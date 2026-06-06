@@ -3,6 +3,9 @@ import type { Metadata, Viewport } from 'next'
 import { Inter } from 'next/font/google'
 import { JUWA2_COPY } from '@/lib/juwa2Theme'
 
+/** Auth and Supabase-backed pages must not prerender at build (needs runtime env). */
+export const dynamic = 'force-dynamic'
+
 const juwa2Footer = Inter({
   subsets: ['latin'],
   display: 'swap',
