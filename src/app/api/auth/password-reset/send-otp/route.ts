@@ -5,10 +5,13 @@ import { createServiceClient } from '@/lib/supabase/server'
 import { getClientIp } from '@/lib/clientIp'
 import { rateLimitSendOtp } from '@/lib/authRateLimit'
 import { verifyTurnstileToken } from '@/lib/verifyTurnstile'
-import { resolveLoginIdentifier } from '@/lib/resolveLoginIdentifier'
+import {
+  isSyntheticStaffAuthEmail,
+  rateLimitKeyForLoginIdentifier,
+  resolveLoginIdentifier,
+} from '@/lib/resolveLoginIdentifier'
 import { JUWA2_BRAND } from '@/lib/juwa2Theme'
 import { getResendFromAddress } from '@/lib/resend'
-import { isSyntheticStaffAuthEmail, normalizeStaffUsername } from '@/lib/staffAuthEmail'
 
 function getResend() {
   const key = process.env.RESEND_API_KEY
@@ -58,9 +61,7 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ error: 'Enter your email or @username.' }, { status: 400 })
     }
 
-    const rateEmail = trimmed.includes('@')
-      ? trimmed.toLowerCase()
-      : `staff:${normalizeStaffUsername(trimmed)}`
+    const rateEmail = rateLimitKeyForLoginIdentifier(trimmed)
 
     const rl = await rateLimitSendOtp(ip, rateEmail)
     if (!rl.allowed) {

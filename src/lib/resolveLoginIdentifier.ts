@@ -1,5 +1,14 @@
 import type { SupabaseClient } from '@supabase/supabase-js'
-import { normalizeStaffUsername } from '@/lib/staffAuthEmail'
+import { isSyntheticStaffAuthEmail, normalizeStaffUsername } from '@/lib/staffAuthEmail'
+
+export { isSyntheticStaffAuthEmail }
+
+/** Stable rate-limit bucket for email or legacy staff @handle login identifiers. */
+export function rateLimitKeyForLoginIdentifier(identifier: string): string {
+  const trimmed = identifier.trim()
+  if (trimmed.includes('@')) return trimmed.toLowerCase()
+  return `staff:${normalizeStaffUsername(trimmed)}`
+}
 
 export type ResolvedAuthLogin = {
   userId: string
