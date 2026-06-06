@@ -1,0 +1,2 @@
+DEPLOY-CHECK-2026-06-06-v3
+If you see this on your Vercel URL, GitHub → Vercel deploy is working.
