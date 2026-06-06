@@ -35,12 +35,18 @@ export function getSiteHostKind(host: string): SiteHostKind {
 
   if (subdomain && subdomain !== 'www') return 'business-subdomain'
   if (h === 'localhost' || h.endsWith('.localhost')) return 'support'
+  if (h.endsWith('.vercel.app')) return 'support'
   if (h === SUPPORT_DOMAIN) return 'support'
   if (h === ROOT_DOMAIN) return 'platform-root'
   return 'support'
 }
 
 export function getSupportSiteUrl(): string {
+  const vercelHost = process.env.VERCEL_URL?.trim()
+  if (vercelHost && !process.env.PUBLIC_SITE_URL?.trim() && !process.env.NEXT_PUBLIC_APP_URL?.trim()) {
+    return `https://${vercelHost.replace(/\/$/, '')}`
+  }
+
   const explicit =
     process.env.PUBLIC_SITE_URL?.trim() || process.env.NEXT_PUBLIC_SITE_URL?.trim()
   if (explicit) return explicit.replace(/\/$/, '')

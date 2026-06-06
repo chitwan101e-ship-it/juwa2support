@@ -2,8 +2,8 @@ const path = require('path')
 
 /** @type {import('next').NextConfig} */
 const nextConfig = {
-  // Use this app folder as the tracing root so Next does not pick a parent lockfile (e.g. C:\Users\chitw).
-  outputFileTracingRoot: path.join(__dirname),
+  // Windows-only: avoid Next picking a parent-folder lockfile during local dev.
+  ...(process.platform === 'win32' ? { outputFileTracingRoot: path.join(__dirname) } : {}),
 
   // Hide the floating "N" dev indicator badge in the browser.
   devIndicators: false,
