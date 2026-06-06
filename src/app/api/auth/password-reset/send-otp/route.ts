@@ -8,6 +8,7 @@ import { verifyTurnstileToken } from '@/lib/verifyTurnstile'
 import { resolveLoginIdentifier } from '@/lib/resolveLoginIdentifier'
 import { JUWA2_BRAND } from '@/lib/juwa2Theme'
 import { getResendFromAddress } from '@/lib/resend'
+import { isSyntheticStaffAuthEmail, normalizeStaffUsername } from '@/lib/staffAuthEmail'
 
 function getResend() {
   const key = process.env.RESEND_API_KEY
