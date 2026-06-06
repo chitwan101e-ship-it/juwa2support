@@ -1,0 +1,27 @@
+-- =============================================================================
+-- Juwa2 Customer Support — Supabase SQL setup (READ THIS FIRST)
+-- =============================================================================
+--
+-- Run IN ORDER in Supabase → SQL Editor (one file at a time):
+--
+--   SCENARIO A — Brand-new empty Supabase project
+--     1) Skip 1_reset.sql
+--     2) Run  2_bootstrap.sql
+--     3) Run  3_extras.sql
+--
+--   SCENARIO B — Bootstrap already ran; "already exists" / policy errors
+--     Run ONLY 3_extras.sql  (safe to re-run)
+--
+--   SCENARIO C — Wipe app data and start over (keeps auth.users)
+--     1) Run  1_reset.sql
+--     2) Run  2_bootstrap.sql
+--     3) Run  3_extras.sql
+--
+-- Do NOT run schema.sql — use the numbered files above.
+--
+-- ADMIN LOGIN (password lives in Supabase Auth, not in your project folder):
+--   1) Dashboard → Authentication → Users → Add user
+--        juwa2support@gmail.com + password + Auto Confirm User
+--   2) SQL Editor → run 4_create_admin.sql
+--   3) Sign in at your app /login → opens /dashboard
+-- =============================================================================

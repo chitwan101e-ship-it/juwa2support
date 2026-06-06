@@ -1,0 +1,96 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+:root {
+  color-scheme: dark;
+  --juwa2-bg: #000000;
+  --juwa2-surface: #0c0c0c;
+  --juwa2-surface-raised: #141414;
+  --juwa2-gold: #d4af37;
+  --juwa2-gold-light: #f5d040;
+  --juwa2-gold-dark: #b8860b;
+  --juwa2-red: #e63946;
+  --juwa2-blue: #2563eb;
+  --juwa2-green: #16a34a;
+  --juwa2-text: #f5f5f5;
+  --juwa2-text-muted: #a3a3a3;
+  --juwa2-gradient: linear-gradient(135deg, #f5d040 0%, #d4af37 45%, #b8860b 100%);
+  --juwa2-gradient-brand: linear-gradient(135deg, #e63946 0%, #2563eb 100%);
+}
+
+html,
+body {
+  max-width: 100%;
+  overflow-x: hidden;
+  overscroll-behavior-x: contain;
+}
+
+img,
+video {
+  max-width: 100%;
+  height: auto;
+}
+
+.juwa2-wordmark {
+  font-family: var(--font-juwa2-footer), 'Inter', ui-sans-serif, system-ui, sans-serif;
+}
+
+.juwa2-footer-bar {
+  font-family: var(--font-juwa2-footer), 'Inter', ui-sans-serif, system-ui, sans-serif;
+  font-optical-sizing: auto;
+  -webkit-font-smoothing: antialiased;
+}
+
+body {
+  @apply text-gray-100;
+  background-color: var(--juwa2-bg);
+  font-family: var(--font-juwa2-footer), 'Inter', ui-sans-serif, system-ui, sans-serif;
+  font-size: 14px;
+  -webkit-font-smoothing: antialiased;
+  text-rendering: optimizeLegibility;
+}
+
+button,
+input,
+textarea {
+  font-family: inherit;
+}
+
+.juwa2-btn {
+  background: var(--juwa2-gradient);
+  color: #000;
+  font-weight: 700;
+  border: 1px solid rgba(212, 175, 55, 0.45);
+}
+
+.juwa2-btn:hover {
+  filter: brightness(1.08);
+}
+
+.juwa2-btn-outline {
+  color: var(--juwa2-gold-light);
+  border: 1px solid rgba(212, 175, 55, 0.4);
+  background: rgba(212, 175, 55, 0.06);
+}
+
+.juwa2-btn-outline:hover {
+  background: rgba(212, 175, 55, 0.12);
+}
+
+.juwa2-card {
+  background: color-mix(in srgb, var(--juwa2-surface) 96%, transparent);
+  border: 1px solid rgba(212, 175, 55, 0.15);
+}
+
+.juwa2-marquee-glow {
+  background:
+    radial-gradient(ellipse 80% 50% at 50% -20%, rgba(212, 175, 55, 0.12), transparent),
+    radial-gradient(ellipse 60% 40% at 80% 0%, rgba(37, 99, 235, 0.08), transparent),
+    radial-gradient(ellipse 60% 40% at 20% 0%, rgba(230, 57, 70, 0.08), transparent),
+    #000000;
+}
+
+.otp-input {
+  @apply w-12 h-14 text-center text-xl font-semibold border border-gray-700 rounded-xl focus:border-amber-500 focus:ring-4 focus:ring-amber-900/40 focus:outline-none transition-all bg-[#141414] text-white;
+}
