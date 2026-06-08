@@ -14,6 +14,7 @@ import { SIGNUP_OTP_VERIFICATION_FAILED } from '@/lib/signupOtp'
 import { TURNSTILE_LOAD_ERROR, TURNSTILE_WIDGET_ERROR } from '@/lib/userFacingErrors'
 import { PendingApprovalPanel } from '@/components/PendingApprovalPanel'
 import { JUWA2_COPY } from '@/lib/juwa2Theme'
+import { showTurnstileWidget, turnstileSiteKey } from '@/lib/turnstileConfig'
 
 type Step = 1 | 2 | 3 | 4
 
@@ -30,8 +31,7 @@ const strengthColors = ['bg-red-400', 'bg-orange-400', 'bg-yellow-400', 'bg-gree
 const strengthLabels = ['Weak', 'Fair', 'Good', 'Strong']
 
 export default function SignUpPage() {
-  const turnstileSiteKey = (process.env.NEXT_PUBLIC_TURNSTILE_SITE_KEY ?? '').trim()
-  const showTurnstile = Boolean(turnstileSiteKey)
+  const showTurnstile = showTurnstileWidget
 
   const router = useRouter()
   const supabase = useMemo(() => createClient(), [])

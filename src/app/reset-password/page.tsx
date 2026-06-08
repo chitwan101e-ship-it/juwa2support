@@ -8,12 +8,12 @@ import { AUTH_INPUT, AUTH_LABEL } from '@/lib/authUi'
 import { TURNSTILE_LOAD_ERROR } from '@/lib/userFacingErrors'
 import { Loader2, Eye, EyeOff, ArrowLeft } from 'lucide-react'
 import { Turnstile, type TurnstileInstance } from '@marsidev/react-turnstile'
+import { showTurnstileWidget, turnstileSiteKey } from '@/lib/turnstileConfig'
 
 function ResetPasswordInner() {
   const router = useRouter()
   const searchParams = useSearchParams()
-  const turnstileSiteKey = (process.env.NEXT_PUBLIC_TURNSTILE_SITE_KEY ?? '').trim()
-  const showTurnstile = Boolean(turnstileSiteKey)
+  const showTurnstile = showTurnstileWidget
 
   const [step, setStep] = useState<1 | 2>(1)
   const [identifier, setIdentifier] = useState('')

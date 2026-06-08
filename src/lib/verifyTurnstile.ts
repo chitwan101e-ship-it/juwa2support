@@ -1,7 +1,9 @@
 /**
  * Cloudflare Turnstile server-side verification.
- * Set TURNSTILE_SECRET_KEY in production. When unset, verification is skipped (local dev).
+ * Set TURNSTILE_SECRET_KEY in production. When unset, verification is skipped.
  */
+
+import { shouldVerifyTurnstile } from '@/lib/turnstileConfig'
 
 type TurnstileVerifyResponse = {
   success?: boolean
@@ -12,8 +14,9 @@ export async function verifyTurnstileToken(
   token: string | undefined,
   _remoteip?: string | null
 ): Promise<{ ok: boolean; error?: string }> {
-  const secret = process.env.TURNSTILE_SECRET_KEY?.trim()
-  if (!secret) return { ok: true }
+  if (!shouldVerifyTurnstile()) return { ok: true }
+
+  const secret = process.env.TURNSTILE_SECRET_KEY!.trim()
 
   if (!token?.trim()) {
     return { ok: false, error: 'Complete the security verification below.' }
