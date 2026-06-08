@@ -56,7 +56,7 @@ export default function SignUpPage() {
   const [turnstileOtpToken, setTurnstileOtpToken] = useState<string | null>(null)
   const [turnstileScriptReady, setTurnstileScriptReady] = useState(false)
   const [turnstileUiError, setTurnstileUiError] = useState<string | null>(null)
-  const turnstileOtpRef = useRef<TurnstileInstance>(null)
+  const turnstileOtpRef = useRef<{ reset: () => void } | null>(null)
   const [signupNeedsSignIn, setSignupNeedsSignIn] = useState(false)
 
   const set = (k: keyof typeof form, v: string) => setForm((f) => ({ ...f, [k]: v }))
