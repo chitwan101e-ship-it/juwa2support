@@ -4,7 +4,7 @@ import { useRouter } from 'next/navigation'
 import { createClient } from '@/lib/supabase/client'
 import { redirectIfAuthenticated } from '@/lib/authRouting'
 import { Juwa2AuthShell } from '@/components/Juwa2AuthShell'
-import { AUTH_INPUT, AUTH_LABEL } from '@/lib/authUi'
+import { AUTH_INPUT, AUTH_LABEL, AUTH_BUTTON, keepAuthButtonClick } from '@/lib/authUi'
 import { Eye, EyeOff, ArrowLeft, Loader2 } from 'lucide-react'
 import clsx from 'clsx'
 import { Turnstile, type TurnstileInstance } from '@marsidev/react-turnstile'
@@ -104,6 +104,7 @@ export default function SignUpPage() {
 
   const sendOTP = useCallback(
     async (source: 'details' | 'resend') => {
+      if (loading) return
       if (source === 'details' && showTurnstile && !turnstileOtpToken) {
         setError('Complete the security check.')
         return
@@ -152,7 +153,7 @@ export default function SignUpPage() {
         setLoading(false)
       }
     },
-    [otpEnabled, showTurnstile, turnstileOtpToken, form.email]
+    [otpEnabled, showTurnstile, turnstileOtpToken, form.email, loading]
   )
 
   function handleOtpChange(i: number, val: string) {
@@ -168,6 +169,7 @@ export default function SignUpPage() {
   }
 
   async function verifyAndContinue() {
+    if (loading) return
     const code = otp.join('')
     if (code.length < 6) {
       setError('Enter all 6 digits')
@@ -199,6 +201,7 @@ export default function SignUpPage() {
   }
 
   async function register() {
+    if (loading) return
     setLoading(true)
     setError('')
     try {
@@ -258,7 +261,25 @@ export default function SignUpPage() {
     phoneValid &&
     (!showTurnstile || !!turnstileOtpToken)
 
-  const registerSubmitReady = true
+  function getStep1BlockReason(): string | null {
+    if (!form.firstName.trim() || !form.lastName.trim()) return 'Enter your legal first and last name.'
+    if (!form.username.trim()) return 'Choose a username.'
+    if (!form.email.trim()) return 'Enter your email address.'
+    if (!phoneValid) return 'Enter a valid phone number.'
+    if (!form.password) return 'Enter a password.'
+    if (showTurnstile && !turnstileOtpToken) return 'Complete the security check.'
+    return null
+  }
+
+  function handleSendVerificationCode() {
+    if (loading) return
+    const block = getStep1BlockReason()
+    if (block) {
+      setError(block)
+      return
+    }
+    void sendOTP('details')
+  }
 
   return (
     <Juwa2AuthShell activeTab="signup" wide>
@@ -455,9 +476,15 @@ export default function SignUpPage() {
 
               <button
                 type="button"
-                onClick={() => void sendOTP('details')}
-                disabled={loading || !canContinueStep1}
-                className="w-full mt-4 py-3 rounded-xl juwa2-btn font-semibold disabled:opacity-40 hover:opacity-95 transition-opacity flex items-center justify-center gap-2"
+                onPointerDown={keepAuthButtonClick}
+                onClick={handleSendVerificationCode}
+                disabled={loading}
+                aria-disabled={loading || !canContinueStep1}
+                className={clsx(
+                  'w-full mt-4 py-3 rounded-xl juwa2-btn font-semibold hover:opacity-95 transition-opacity flex items-center justify-center gap-2',
+                  AUTH_BUTTON,
+                  (loading || !canContinueStep1) && 'opacity-40 cursor-not-allowed'
+                )}
               >
                 {loading ? (
                   <>
@@ -532,9 +559,13 @@ export default function SignUpPage() {
 
               <button
                 type="button"
+                onPointerDown={keepAuthButtonClick}
                 onClick={() => void verifyAndContinue()}
                 disabled={loading}
-                className="w-full py-3 rounded-xl bg-gradient-to-r from-[#d4af37] to-[#b8860b] text-white font-semibold hover:opacity-90 transition-opacity disabled:opacity-40 flex items-center justify-center gap-2"
+                className={clsx(
+                  'w-full py-3 rounded-xl bg-gradient-to-r from-[#d4af37] to-[#b8860b] text-white font-semibold hover:opacity-90 transition-opacity disabled:opacity-40 flex items-center justify-center gap-2',
+                  AUTH_BUTTON
+                )}
               >
                 {loading ? (
                   <>
@@ -572,9 +603,14 @@ export default function SignUpPage() {
               {error && <p className="text-red-400 text-sm mb-3">{error}</p>}
               <button
                 type="button"
+                onPointerDown={keepAuthButtonClick}
                 onClick={() => void register()}
-                disabled={loading || !registerSubmitReady}
-                className="w-full py-3 rounded-xl juwa2-btn font-semibold disabled:opacity-40 hover:opacity-95 transition-opacity flex items-center justify-center gap-2"
+                disabled={loading}
+                className={clsx(
+                  'w-full py-3 rounded-xl juwa2-btn font-semibold hover:opacity-95 transition-opacity flex items-center justify-center gap-2',
+                  AUTH_BUTTON,
+                  loading && 'opacity-40 cursor-not-allowed'
+                )}
               >
                 {loading ? (
                   <>

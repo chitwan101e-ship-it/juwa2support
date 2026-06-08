@@ -4,7 +4,7 @@ import { Suspense, useCallback, useEffect, useMemo, useRef, useState } from 'rea
 import Link from 'next/link'
 import { useRouter, useSearchParams } from 'next/navigation'
 import { Juwa2AuthShell } from '@/components/Juwa2AuthShell'
-import { AUTH_INPUT, AUTH_LABEL } from '@/lib/authUi'
+import { AUTH_INPUT, AUTH_LABEL, AUTH_BUTTON, keepAuthButtonClick } from '@/lib/authUi'
 import { TURNSTILE_LOAD_ERROR } from '@/lib/userFacingErrors'
 import { Loader2, Eye, EyeOff, ArrowLeft } from 'lucide-react'
 import { Turnstile, type TurnstileInstance } from '@marsidev/react-turnstile'
@@ -45,6 +45,7 @@ function ResetPasswordInner() {
   }, [showTurnstile, turnstileScriptReady])
 
   const sendCode = useCallback(async () => {
+    if (loading) return
     const id = identifier.trim()
     if (!id) {
       setError('Enter your email or @username.')
@@ -79,10 +80,11 @@ function ResetPasswordInner() {
     } finally {
       setLoading(false)
     }
-  }, [identifier, showTurnstile, turnstileToken])
+  }, [identifier, showTurnstile, turnstileToken, loading])
 
   async function submitNewPassword(e: React.FormEvent) {
     e.preventDefault()
+    if (loading) return
     setError('')
     if (password.length < 8) {
       setError('Use at least 8 characters.')
@@ -178,9 +180,10 @@ function ResetPasswordInner() {
 
           <button
             type="button"
+            onPointerDown={keepAuthButtonClick}
             onClick={() => void sendCode()}
             disabled={loading}
-            className="w-full py-3 rounded-xl juwa2-btn font-semibold hover:opacity-95 transition-opacity disabled:opacity-40 flex items-center justify-center gap-2"
+            className={`w-full py-3 rounded-xl juwa2-btn font-semibold hover:opacity-95 transition-opacity disabled:opacity-40 flex items-center justify-center gap-2 ${AUTH_BUTTON}`}
           >
             {loading ? (
               <>
@@ -247,7 +250,8 @@ function ResetPasswordInner() {
           <button
             type="submit"
             disabled={loading}
-            className="w-full py-3 rounded-xl juwa2-btn font-semibold hover:opacity-95 transition-opacity disabled:opacity-40 flex items-center justify-center gap-2"
+            onPointerDown={keepAuthButtonClick}
+            className={`w-full py-3 rounded-xl juwa2-btn font-semibold hover:opacity-95 transition-opacity disabled:opacity-40 flex items-center justify-center gap-2 ${AUTH_BUTTON}`}
           >
             {loading ? (
               <>
