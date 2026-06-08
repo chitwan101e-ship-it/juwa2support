@@ -4,8 +4,7 @@ import { Resend } from 'resend'
 import { createServiceClient } from '@/lib/supabase/server'
 import { getClientIp } from '@/lib/clientIp'
 import { rateLimitSendOtp } from '@/lib/authRateLimit'
-// Cloudflare Turnstile disabled for signup
-// import { verifyTurnstileToken } from '@/lib/verifyTurnstile'
+import { verifyTurnstileToken } from '@/lib/verifyTurnstile'
 import { OTP_RESEND_KEY_ERROR, OTP_SEND_CONFIG_ERROR } from '@/lib/userFacingErrors'
 import { JUWA2_BRAND } from '@/lib/juwa2Theme'
 import { getResendFromAddress } from '@/lib/resend'
@@ -45,11 +44,10 @@ export async function POST(req: NextRequest) {
 
     const ip = getClientIp(req)
 
-    // Cloudflare Turnstile disabled for signup
-    // const captcha = await verifyTurnstileToken(turnstileToken, ip)
-    // if (!captcha.ok) {
-    //   return NextResponse.json({ error: captcha.error ?? 'Verification failed' }, { status: 400 })
-    // }
+    const captcha = await verifyTurnstileToken(turnstileToken, ip)
+    if (!captcha.ok) {
+      return NextResponse.json({ error: captcha.error ?? 'Verification failed' }, { status: 400 })
+    }
 
     const rl = await rateLimitSendOtp(ip, String(email))
     if (!rl.allowed) {

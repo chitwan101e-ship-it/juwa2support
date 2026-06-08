@@ -5,8 +5,7 @@ import { normalizePhoneForDedup } from '@/lib/phoneNormalize'
 import { notifyEveryBusinessAdmin } from '@/lib/notifyStaffAdmins'
 import { getClientIp } from '@/lib/clientIp'
 import { rateLimitRegister } from '@/lib/authRateLimit'
-// Cloudflare Turnstile disabled for signup
-// import { verifyTurnstileToken } from '@/lib/verifyTurnstile'
+import { verifyTurnstileToken } from '@/lib/verifyTurnstile'
 import { SIGNUP_OTP_VERIFICATION_FAILED } from '@/lib/signupOtp'
 import crypto from 'crypto'
 
@@ -57,16 +56,15 @@ export async function POST(req: NextRequest) {
       turnstileToken,
     } = body
 
-    // Cloudflare Turnstile disabled for signup
-    // if (!otpEnabled) {
-    //   const captcha = await verifyTurnstileToken(
-    //     typeof turnstileToken === 'string' ? turnstileToken : undefined,
-    //     ip
-    //   )
-    //   if (!captcha.ok) {
-    //     return NextResponse.json({ error: captcha.error ?? 'Verification failed' }, { status: 400 })
-    //   }
-    // }
+    if (!otpEnabled) {
+      const captcha = await verifyTurnstileToken(
+        typeof turnstileToken === 'string' ? turnstileToken : undefined,
+        ip
+      )
+      if (!captcha.ok) {
+        return NextResponse.json({ error: captcha.error ?? 'Verification failed' }, { status: 400 })
+      }
+    }
 
     if (!email || !password || !firstName || !lastName || !username || !phone) {
       return NextResponse.json({ error: 'Missing required fields' }, { status: 400 })

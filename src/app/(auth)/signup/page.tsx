@@ -7,8 +7,7 @@ import { Juwa2AuthShell } from '@/components/Juwa2AuthShell'
 import { AUTH_INPUT, AUTH_LABEL } from '@/lib/authUi'
 import { Eye, EyeOff, ArrowLeft, Loader2 } from 'lucide-react'
 import clsx from 'clsx'
-// Cloudflare Turnstile disabled for signup
-// import { Turnstile, type TurnstileInstance } from '@marsidev/react-turnstile'
+import { Turnstile, type TurnstileInstance } from '@marsidev/react-turnstile'
 import { combineInternationalPhone, COUNTRY_DIAL_OPTIONS } from '@/lib/countryDialCodes'
 import { normalizePhoneForDedup } from '@/lib/phoneNormalize'
 import { SIGNUP_OTP_VERIFICATION_FAILED } from '@/lib/signupOtp'
@@ -31,9 +30,8 @@ const strengthColors = ['bg-red-400', 'bg-orange-400', 'bg-yellow-400', 'bg-gree
 const strengthLabels = ['Weak', 'Fair', 'Good', 'Strong']
 
 export default function SignUpPage() {
-  // Cloudflare Turnstile disabled for signup
-  // const turnstileSiteKey = (process.env.NEXT_PUBLIC_TURNSTILE_SITE_KEY ?? '').trim()
-  const showTurnstile = false // Boolean(turnstileSiteKey)
+  const turnstileSiteKey = (process.env.NEXT_PUBLIC_TURNSTILE_SITE_KEY ?? '').trim()
+  const showTurnstile = Boolean(turnstileSiteKey)
 
   const router = useRouter()
   const supabase = useMemo(() => createClient(), [])
@@ -58,7 +56,7 @@ export default function SignUpPage() {
   const [turnstileOtpToken, setTurnstileOtpToken] = useState<string | null>(null)
   const [turnstileScriptReady, setTurnstileScriptReady] = useState(false)
   const [turnstileUiError, setTurnstileUiError] = useState<string | null>(null)
-  const turnstileOtpRef = useRef<{ reset: () => void } | null>(null)
+  const turnstileOtpRef = useRef<TurnstileInstance>(null)
   const [signupNeedsSignIn, setSignupNeedsSignIn] = useState(false)
 
   const set = (k: keyof typeof form, v: string) => setForm((f) => ({ ...f, [k]: v }))
@@ -427,7 +425,6 @@ export default function SignUpPage() {
 
               {error && <p className="text-red-400 text-sm mt-2">{error}</p>}
 
-              {/* Cloudflare Turnstile disabled for signup
               {showTurnstile ? (
                 <div className="mt-4 mb-2 flex justify-center">
                   <Turnstile
@@ -455,7 +452,6 @@ export default function SignUpPage() {
               {showTurnstile && turnstileUiError ? (
                 <p className="text-amber-300 text-xs mt-1 mb-2">{turnstileUiError}</p>
               ) : null}
-              */}
 
               <button
                 type="button"
