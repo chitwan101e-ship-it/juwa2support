@@ -37,7 +37,7 @@ function thrownMessage(err: unknown): string {
 
 export async function POST(req: NextRequest) {
   try {
-    const otpEnabled = false // process.env.ENABLE_OTP === 'true'
+    const otpEnabled = process.env.ENABLE_OTP === 'true'
     const body = await req.json()
     const { email: emailRaw, turnstileToken } = body as { email?: string; turnstileToken?: string }
     if (!emailRaw) return NextResponse.json({ error: 'Email required' }, { status: 400 })

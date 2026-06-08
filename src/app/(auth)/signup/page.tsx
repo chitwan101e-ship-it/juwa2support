@@ -63,8 +63,7 @@ export default function SignUpPage() {
 
   const set = (k: keyof typeof form, v: string) => setForm((f) => ({ ...f, [k]: v }))
 
-  // OTP disabled for signup
-  const otpEnabled = false // process.env.NEXT_PUBLIC_ENABLE_OTP === 'true'
+  const otpEnabled = process.env.NEXT_PUBLIC_ENABLE_OTP === 'true'
 
   useEffect(() => {
     if (step === 4) return

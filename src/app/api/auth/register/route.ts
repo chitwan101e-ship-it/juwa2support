@@ -42,7 +42,7 @@ export async function POST(req: NextRequest) {
       )
     }
 
-    const otpEnabled = false // process.env.ENABLE_OTP === 'true'
+    const otpEnabled = process.env.ENABLE_OTP === 'true'
     const body = await req.json()
     const {
       email,
