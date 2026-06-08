@@ -16,9 +16,8 @@ export const metadata: Metadata = {
   title: JUWA2_COPY.productName,
   description: JUWA2_COPY.productTagline,
   icons: {
-    icon: [{ url: '/logo2.png', type: 'image/png' }],
-    shortcut: '/logo2.png',
-    apple: '/logo2.png',
+    icon: [{ url: '/favicon.svg', type: 'image/svg+xml' }],
+    shortcut: '/favicon.svg',
   },
 }
 

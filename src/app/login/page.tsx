@@ -104,7 +104,7 @@ export default function LoginPage() {
               autoComplete="current-password"
               value={password}
               onChange={(e) => setPassword(e.target.value)}
-              placeholder="????????"
+              placeholder="Enter your password"
               className={`${AUTH_INPUT} pr-10`}
               required
             />

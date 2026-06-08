@@ -42,7 +42,8 @@ export default function Juwa2Logo({
           unoptimized
           sizes={`${w}px`}
           className="object-contain object-center bg-transparent"
-          priority={size === 'lg' || size === 'hero'}
+          loading="eager"
+          priority={size === 'hero'}
         />
       </div>
 

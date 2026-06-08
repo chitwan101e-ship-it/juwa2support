@@ -46,7 +46,6 @@ export default async function HomePage() {
           </div>
 
           <p className="mt-6 text-[11px] text-[#5c6478] leading-relaxed">{JUWA2_COPY.productTagline}</p>
-          <p className="mt-3 text-[10px] text-[#3d4558] font-mono">Deploy: DEPLOY-CHECK-2026-06-08-v5</p>
         </div>
       </main>
     </div>

@@ -70,8 +70,6 @@ export function Juwa2AuthShell({
           </header>
 
           {children}
-
-          <p className="mt-6 text-center text-[10px] text-[#3d4558] font-mono">Deploy: DEPLOY-CHECK-2026-06-08-v5</p>
         </div>
       </main>
     </div>
