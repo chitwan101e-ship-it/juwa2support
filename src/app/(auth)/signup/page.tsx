@@ -12,11 +12,10 @@ import { combineInternationalPhone, COUNTRY_DIAL_OPTIONS } from '@/lib/countryDi
 import { normalizePhoneForDedup } from '@/lib/phoneNormalize'
 import { SIGNUP_OTP_VERIFICATION_FAILED } from '@/lib/signupOtp'
 import { TURNSTILE_LOAD_ERROR, TURNSTILE_WIDGET_ERROR } from '@/lib/userFacingErrors'
-import { PendingApprovalPanel } from '@/components/PendingApprovalPanel'
 import { JUWA2_COPY } from '@/lib/juwa2Theme'
 import { showTurnstileWidget, turnstileSiteKey } from '@/lib/turnstileConfig'
 
-type Step = 1 | 2 | 3 | 4
+type Step = 1 | 2 | 3
 
 function passwordStrength(pw: string) {
   let score = 0
@@ -57,14 +56,11 @@ export default function SignUpPage() {
   const [turnstileScriptReady, setTurnstileScriptReady] = useState(false)
   const [turnstileUiError, setTurnstileUiError] = useState<string | null>(null)
   const turnstileOtpRef = useRef<TurnstileInstance>(null)
-  const [signupNeedsSignIn, setSignupNeedsSignIn] = useState(false)
-
   const set = (k: keyof typeof form, v: string) => setForm((f) => ({ ...f, [k]: v }))
 
   const otpEnabled = process.env.NEXT_PUBLIC_ENABLE_OTP === 'true'
 
   useEffect(() => {
-    if (step === 4) return
     let cancelled = false
     void (async () => {
       if (cancelled) return
@@ -73,7 +69,7 @@ export default function SignUpPage() {
     return () => {
       cancelled = true
     }
-  }, [router, supabase, step])
+  }, [router, supabase])
 
   useEffect(() => {
     if (!showTurnstile) return
@@ -235,8 +231,11 @@ export default function SignUpPage() {
         email: form.email.trim().toLowerCase(),
         password: form.password,
       })
-      setSignupNeedsSignIn(Boolean(signErr))
-      setStep(4)
+      if (signErr) {
+        router.replace('/login?registered=1')
+        return
+      }
+      router.replace('/feed?welcome=1')
     } catch (e: unknown) {
       setError(e instanceof Error ? e.message : 'Registration failed')
     } finally {
@@ -248,9 +247,8 @@ export default function SignUpPage() {
   const fullInternationalPhone = combineInternationalPhone(phoneCountryIso, phoneNational)
   const phoneValid = normalizePhoneForDedup(fullInternationalPhone) !== null
 
-  const progressTotal = otpEnabled ? 4 : 3
-  const progressIndex =
-    step === 1 ? 0 : step === 2 ? 1 : step === 3 ? (otpEnabled ? 2 : 1) : otpEnabled ? 3 : 2
+  const progressTotal = otpEnabled ? 3 : 2
+  const progressIndex = step === 1 ? 0 : step === 2 ? 1 : otpEnabled ? 2 : 1
 
   const canContinueStep1 =
     !!form.email &&
@@ -283,8 +281,7 @@ export default function SignUpPage() {
 
   return (
     <Juwa2AuthShell activeTab="signup" wide>
-      {step < 4 && (
-        <div className="flex gap-1 justify-center mb-6">
+      <div className="flex gap-1 justify-center mb-6">
           {Array.from({ length: progressTotal }).map((_, i) => (
             <div
               key={i}
@@ -295,7 +292,6 @@ export default function SignUpPage() {
             />
           ))}
         </div>
-      )}
 
           {/* Step 1: Account details (customers only) */}
           {step === 1 && (
@@ -623,10 +619,6 @@ export default function SignUpPage() {
             </>
           )}
 
-          {/* Step 4: Request submitted + waiting for approval */}
-          {step === 4 && (
-            <PendingApprovalPanel embedded needsSignIn={signupNeedsSignIn} />
-          )}
     </Juwa2AuthShell>
   )
 }

@@ -35,7 +35,7 @@ async function assignNewlyApprovedLabel(
 }
 
 export const DEFAULT_APPROVAL_WELCOME_TEMPLATE =
-  "Welcome, {customer_name}! Your account has been approved. We're glad to have you at JUWA2 Support. Message us here anytime if you need help."
+  "Welcome, {customer_name}! We're glad to have you at {business}. Message us here anytime if you need help."
 
 export function renderApprovalWelcomeMessage(params: {
   customerName: string

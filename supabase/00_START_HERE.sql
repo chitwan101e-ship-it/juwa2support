@@ -8,9 +8,10 @@
 --     1) Skip 1_reset.sql
 --     2) Run  2_bootstrap.sql
 --     3) Run  3_extras.sql
+--     4) Run  5_game_sso.sql   (in-app game chat SSO)
 --
 --   SCENARIO B — Bootstrap already ran; "already exists" / policy errors
---     Run ONLY 3_extras.sql  (safe to re-run)
+--     Run 3_extras.sql and 5_game_sso.sql as needed  (safe to re-run)
 --
 --   SCENARIO C — Wipe app data and start over (keeps auth.users)
 --     1) Run  1_reset.sql

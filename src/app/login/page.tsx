@@ -26,6 +26,7 @@ export default function LoginPage() {
     const err = q.get('error')
     if (err) setError(decodeURIComponent(err))
     if (q.get('reset') === 'ok') setInfo('Password updated. Sign in with your new password.')
+    if (q.get('registered') === '1') setInfo('Account created. Sign in to get started.')
   }, [])
 
   useEffect(() => {

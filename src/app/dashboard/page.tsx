@@ -429,6 +429,7 @@ export default function DashboardPage() {
   const [suspendedMembers, setSuspendedMembers] = useState<ActiveMember[]>([])
   const [usersPanelTab, setUsersPanelTab] = useState<UsersPanelTab>('pending')
   const [modBusyId, setModBusyId] = useState<string | null>(null)
+  const [removeCustomerBusyId, setRemoveCustomerBusyId] = useState<string | null>(null)
   const [memberMessageDrafts, setMemberMessageDrafts] = useState<Record<string, string>>({})
   const [memberSendBusyId, setMemberSendBusyId] = useState<string | null>(null)
   const [memberStartBusyId, setMemberStartBusyId] = useState<string | null>(null)
@@ -1769,6 +1770,39 @@ export default function DashboardPage() {
       alert(e instanceof Error ? e.message : 'Could not remove staff.')
     } finally {
       setRemoveStaffBusyId(null)
+    }
+  }
+
+  async function removeCustomer(userId: string, displayName: string) {
+    const role = profileRef.current?.business_role
+    if (role !== 'admin' && role !== 'support') return
+    if (
+      !window.confirm(
+        `Remove ${displayName}? They will lose access and cannot sign in again with this account.`
+      )
+    ) {
+      return
+    }
+    setRemoveCustomerBusyId(userId)
+    try {
+      const open = convoList.find((c) => c.id === selectedConvoId)
+      if (open?.customer_id === userId) {
+        setSelectedConvoId(null)
+        setThreadMessages([])
+      }
+      const res = await fetch('/api/staff/remove-customer', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ targetUserId: userId }),
+      })
+      const j = (await res.json()) as { error?: string }
+      if (!res.ok) throw new Error(j.error || 'Request failed')
+      const p = profileRef.current
+      if (p) await refreshDashboard(p)
+    } catch (e) {
+      alert(e instanceof Error ? e.message : 'Request failed')
+    } finally {
+      setRemoveCustomerBusyId(null)
     }
   }
 
@@ -4388,8 +4422,8 @@ export default function DashboardPage() {
         {activeTab === 'users' ? (
           <section className="space-y-4">
             <p className="text-[12px] text-[#8892b0] leading-relaxed">
-              Approve new signups and manage active members for your business. Admins and support use the same tools here; pending customers cannot
-              use the app until approved.
+              New customers join instantly with a welcome message. Manage active members here — suspend or remove accounts as needed. The Pending tab
+              shows any legacy signups still awaiting manual review.
             </p>
             <div className="grid grid-cols-2 sm:grid-cols-4 gap-2.5">
               <StatCard icon={<User2 className="w-4 h-4" />} label="Pending" value={pendingCustomers.length} accent="yellow" />
@@ -4441,9 +4475,12 @@ export default function DashboardPage() {
               {usersPanelTab === 'pending' ? (
                 <div className="space-y-2">
                   <h4 className="text-sm font-semibold tracking-wide text-[#9ea8cc] uppercase">Pending approval</h4>
+                  <p className="text-[#7d86a8] text-xs">
+                    Status: <span className="text-amber-300 font-medium">pending</span> — new signups are auto-approved; this list is for older accounts only.
+                  </p>
                   <div className="rounded-2xl border border-white/10 bg-[#0d1428]/90 p-2.5 sm:p-3 space-y-2.5 shadow-[0_20px_50px_-35px_rgba(30,49,112,0.95)]">
                     {pendingCustomers.length === 0 ? (
-                      <p className="text-sm text-[#7d86a8] py-4 text-center">No pending signups.</p>
+                      <p className="text-sm text-[#7d86a8] py-4 text-center">No pending signups — all new accounts are approved automatically.</p>
                     ) : (
                       pendingCustomers.map((cust) => (
                         <article key={cust.id} className="rounded-xl border border-white/10 bg-[#121d3a] p-3 space-y-2.5">
@@ -4451,8 +4488,11 @@ export default function DashboardPage() {
                             <p className="font-semibold">
                               {`${cust.first_name ?? ''} ${cust.last_name ?? ''}`.trim() || cust.username}
                             </p>
-                            <p className="text-[#7d86a8] text-sm">
-                              @{cust.username} · joined {timeAgo(cust.created_at)}
+                            <p className="text-[#7d86a8] text-sm flex flex-wrap items-center gap-2">
+                              <span>
+                                @{cust.username} · joined {timeAgo(cust.created_at)}
+                              </span>
+                              <AccountStatusBadge status={cust.account_status || 'pending'} />
                             </p>
                             <div className="mt-1.5 grid grid-cols-1 sm:grid-cols-2 gap-x-4 gap-y-1 text-xs text-[#9ea8cc]">
                               <p className="break-all">
@@ -4623,10 +4663,13 @@ export default function DashboardPage() {
                                 )}
                                 <div className="min-w-0">
                                   <p className="font-medium truncate text-[14px]">{label}</p>
-                                  <p className="text-[13px] text-[#7d86a8] truncate">@{m.username}</p>
+                                  <p className="text-[13px] text-[#7d86a8] truncate flex flex-wrap items-center gap-2">
+                                    <span>@{m.username}</span>
+                                    <AccountStatusBadge status={m.account_status} />
+                                  </p>
                                 </div>
                               </div>
-                              <div className="flex items-center gap-1.5 shrink-0">
+                              <div className="flex items-center gap-1.5 shrink-0 flex-wrap justify-end">
                                 <button
                                   type="button"
                                   disabled={memberSending}
@@ -4650,6 +4693,15 @@ export default function DashboardPage() {
                                 >
                                   <Ban className="w-4 h-4 shrink-0" />
                                   {modBusyId === m.id ? '—' : 'Suspend'}
+                                </button>
+                                <button
+                                  type="button"
+                                  disabled={removeCustomerBusyId === m.id}
+                                  onClick={() => void removeCustomer(m.id, label)}
+                                  className="inline-flex items-center gap-1.5 rounded-lg border border-red-500/40 bg-red-500/10 px-2.5 py-1.5 text-[13px] text-red-200 hover:bg-red-500/20 disabled:opacity-40"
+                                >
+                                  <Trash2 className="w-4 h-4 shrink-0" />
+                                  {removeCustomerBusyId === m.id ? '—' : 'Remove'}
                                 </button>
                               </div>
                             </div>
@@ -4710,9 +4762,13 @@ export default function DashboardPage() {
                           <div key={m.id} className="flex flex-wrap items-center justify-between gap-2.5 px-3 py-2.5">
                             <div className="min-w-0">
                               <p className="font-medium truncate text-[14px]">{label}</p>
-                              <p className="text-[13px] text-[#7d86a8] truncate">@{m.username}</p>
+                              <p className="text-[13px] text-[#7d86a8] truncate flex flex-wrap items-center gap-2">
+                                <span>@{m.username}</span>
+                                <AccountStatusBadge status={m.account_status} />
+                              </p>
                             </div>
-                            <button
+                            <div className="flex items-center gap-1.5 shrink-0 flex-wrap justify-end">
+                              <button
                                 type="button"
                                 disabled={modBusyId === m.id}
                                 onClick={() => void moderateSuspension(m.id, 'unsuspend', label)}
@@ -4721,6 +4777,16 @@ export default function DashboardPage() {
                                 <UserCheck className="w-4 h-4 shrink-0" />
                                 {modBusyId === m.id ? '—' : 'Unsuspend'}
                               </button>
+                              <button
+                                type="button"
+                                disabled={removeCustomerBusyId === m.id}
+                                onClick={() => void removeCustomer(m.id, label)}
+                                className="inline-flex items-center gap-1.5 rounded-lg border border-red-500/40 bg-red-500/10 px-2.5 py-1.5 text-[13px] text-red-200 hover:bg-red-500/20 disabled:opacity-40"
+                              >
+                                <Trash2 className="w-4 h-4 shrink-0" />
+                                {removeCustomerBusyId === m.id ? '—' : 'Remove'}
+                              </button>
+                            </div>
                           </div>
                         )
                       })
@@ -5149,6 +5215,26 @@ export default function DashboardPage() {
         })}
       </nav>
     </div>
+  )
+}
+
+function AccountStatusBadge({ status }: { status: string }) {
+  const styles: Record<string, string> = {
+    approved: 'bg-emerald-500/15 text-emerald-300',
+    pending: 'bg-amber-500/15 text-amber-300',
+    suspended: 'bg-red-500/15 text-red-300',
+    blocked: 'bg-white/10 text-[#9ea8cc]',
+    rejected: 'bg-white/10 text-[#9ea8cc]',
+  }
+  const label = status || 'unknown'
+  return (
+    <span
+      className={`inline-block rounded-full px-1.5 py-[1px] text-[10px] font-semibold uppercase tracking-wide ${
+        styles[label] ?? styles.blocked
+      }`}
+    >
+      {label}
+    </span>
   )
 }
 

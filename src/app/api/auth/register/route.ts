@@ -3,6 +3,9 @@ import { NextRequest, NextResponse } from 'next/server'
 import { createServiceClient } from '@/lib/supabase/server'
 import { normalizePhoneForDedup } from '@/lib/phoneNormalize'
 import { notifyEveryBusinessAdmin } from '@/lib/notifyStaffAdmins'
+import { sendApprovalWelcomeMessage } from '@/lib/approvalWelcomeMessage'
+import { sendAccountApprovedEmail } from '@/lib/sendApprovalEmail'
+import { resolvePrimaryBusinessForSignup } from '@/lib/resolvePrimaryBusiness'
 import { getClientIp } from '@/lib/clientIp'
 import { rateLimitRegister } from '@/lib/authRateLimit'
 import { verifyTurnstileToken } from '@/lib/verifyTurnstile'
@@ -153,7 +156,7 @@ export async function POST(req: NextRequest) {
       })
 
       return NextResponse.json(
-        { error: 'An account with this phone number already exists or is pending approval.' },
+        { error: 'An account with this phone number already exists.' },
         { status: 400 }
       )
     }
@@ -187,7 +190,7 @@ export async function POST(req: NextRequest) {
       role: 'customer',
       business_id: null,
       business_role: null,
-      account_status: 'pending',
+      account_status: 'approved',
       email_verified: otpEnabled,
     })
 
@@ -206,17 +209,71 @@ export async function POST(req: NextRequest) {
 
     await logAttempt(false, null)
 
+    const customerName = `${firstName} ${lastName}`.trim() || cleanUsername
+    const primaryBiz = await resolvePrimaryBusinessForSignup(supabase)
+    let businessId: string | null = null
+    let subdomain: string | null = null
+
+    if (primaryBiz) {
+      businessId = primaryBiz.id
+      const { data: bizRow } = await supabase
+        .from('businesses')
+        .select('slug')
+        .eq('id', primaryBiz.id)
+        .maybeSingle()
+      subdomain = (bizRow?.slug as string | undefined) ?? null
+
+      const { error: fErr } = await supabase.from('follows').insert({
+        user_id: userId,
+        business_id: primaryBiz.id,
+      })
+      if (fErr && fErr.code !== '23505') {
+        console.error('[register] follow insert:', fErr)
+      }
+
+      const { error: nErr } = await supabase.from('notifications').insert({
+        user_id: userId,
+        business_id: primaryBiz.id,
+        type: 'account_approved',
+        title: 'Welcome to JUWA2 Support',
+        body: `You're all set. Open your feed for updates from ${primaryBiz.name}.`,
+        link: '/feed',
+      })
+      if (nErr) console.error('[register] welcome notification:', nErr)
+
+      if (primaryBiz.staffSenderId) {
+        await sendApprovalWelcomeMessage(supabase, {
+          businessId: primaryBiz.id,
+          customerId: userId,
+          staffSenderId: primaryBiz.staffSenderId,
+          customerName,
+          username: cleanUsername,
+          businessName: primaryBiz.name,
+        })
+      }
+
+      const emailKey = String(email).trim().toLowerCase()
+      if (emailKey.includes('@')) {
+        await sendAccountApprovedEmail({
+          to: emailKey,
+          customerName,
+          username: cleanUsername,
+          businessName: primaryBiz.name,
+        })
+      }
+    }
+
     await notifyEveryBusinessAdmin(supabase, {
-      title: 'New customer signup pending',
-      body: `@${cleanUsername} (${firstName} ${lastName}) — phone: ${String(phone).trim()}${referral ? ` — referral: @${referral}` : ''}${question ? ` — question: "${question.slice(0, 120)}${question.length > 120 ? '…' : ''}"` : ''}. Review pending accounts in the dashboard.`,
+      title: 'New customer joined',
+      body: `@${cleanUsername} (${firstName} ${lastName}) — phone: ${String(phone).trim()}${referral ? ` — referral: @${referral}` : ''}${question ? ` — question: "${question.slice(0, 120)}${question.length > 120 ? '…' : ''}"` : ''}.`,
       link: '/notifications',
     })
 
     return NextResponse.json({
       success: true,
       userId,
-      businessId: null,
-      subdomain: null,
+      businessId,
+      subdomain,
     })
   } catch (err: unknown) {
     console.error('[register]', err)

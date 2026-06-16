@@ -7,7 +7,8 @@
     "build": "next build",
     "start": "next start",
     "lint": "next lint",
-    "seed:admin": "node scripts/seed-admin.mjs"
+    "seed:admin": "node scripts/seed-admin.mjs",
+    "game-sso-token": "node scripts/game-sso-token.mjs"
   },
   "dependencies": {
     "@marsidev/react-turnstile": "^1.5.1",

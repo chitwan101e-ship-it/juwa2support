@@ -35,7 +35,7 @@ export async function sendAccountApprovedEmail(opts: {
   const { error } = await resend.emails.send({
     from: getResendFromAddress(),
     to,
-    subject: `Your ${JUWA2_BRAND} account is approved`,
+    subject: `Welcome to ${JUWA2_BRAND}`,
     html: `
       <div style="font-family: sans-serif; max-width: 480px; margin: 0 auto; padding: 32px;">
         <h1 style="font-size: 24px; color: #1a56e8; margin-bottom: 8px;">${escapeHtml(JUWA2_BRAND)}</h1>

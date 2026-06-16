@@ -32,7 +32,7 @@ export const JUWA2_COPY = {
   productTagline: 'Message the team. Read player updates.',
   supportShort: 'Player support',
   authSubtitle: 'Player support and updates, in one place.',
-  approvalBadge: 'Access requires staff approval',
-  signupHint: 'Use your legal name. New accounts are reviewed by staff.',
+  approvalBadge: 'Instant access — start messaging right away',
+  signupHint: 'Use your legal name. Your account is ready as soon as you sign up.',
   businessPoweredBy: `Powered by ${JUWA2_BRAND}`,
 } as const
