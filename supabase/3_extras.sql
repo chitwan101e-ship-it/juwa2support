@@ -1221,3 +1221,30 @@ grant update on table public.businesses to authenticated;
 
 -- Drop deprecated auth lookup RPC name if present (safe to re-run)
 drop function if exists public.relay_auth_user_id_for_email(text) cascade;
+
+-- ── Migration: 6_auto_approve_customers.sql ──
+-- Enforce instant approval for new customer signups even if app code is behind on deploy.
+
+create or replace function public.auto_approve_customer_on_insert()
+returns trigger
+language plpgsql
+as $$
+begin
+  if new.role = 'customer' and new.account_status = 'pending' then
+    new.account_status := 'approved';
+  end if;
+  return new;
+end;
+$$;
+
+drop trigger if exists profiles_auto_approve_customer on public.profiles;
+create trigger profiles_auto_approve_customer
+  before insert on public.profiles
+  for each row
+  execute function public.auto_approve_customer_on_insert();
+
+update public.profiles
+set account_status = 'approved'
+where role = 'customer'
+  and account_status = 'pending'
+  and deleted_at is null;
