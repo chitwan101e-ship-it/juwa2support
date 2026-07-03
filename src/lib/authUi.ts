@@ -10,9 +10,17 @@ export const AUTH_LABEL = 'block text-[11px] font-medium text-[#8b96b8] uppercas
 export const AUTH_BUTTON = 'touch-manipulation select-none'
 
 /**
- * Prevents the first click/tap from being lost when an input still has focus
- * (common on mobile and some desktop browsers after typing in a password field).
+ * Run the auth action on pointerdown so the first tap works even when an input
+ * still has focus. preventDefault alone (without running the action) can swallow
+ * the first click on submit buttons in some browsers.
  */
-export function keepAuthButtonClick(e: PointerEvent<HTMLButtonElement>) {
+export function runAuthButtonAction(
+  e: PointerEvent<HTMLButtonElement>,
+  action: () => void
+) {
+  if (e.button !== 0) return
+  const btn = e.currentTarget
+  if (btn.disabled || btn.getAttribute('aria-disabled') === 'true') return
   e.preventDefault()
+  action()
 }

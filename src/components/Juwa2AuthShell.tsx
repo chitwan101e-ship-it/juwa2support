@@ -50,7 +50,8 @@ export function Juwa2AuthShell({
               ) : (
                 <Link
                   href="/login"
-                  className="flex-1 text-center py-2.5 text-[#8b96b8] rounded-xl hover:text-white transition-colors"
+                  prefetch
+                  className="flex-1 text-center py-2.5 text-[#8b96b8] rounded-xl hover:text-white transition-colors touch-manipulation select-none"
                 >
                   Sign In
                 </Link>
@@ -60,7 +61,8 @@ export function Juwa2AuthShell({
               ) : (
                 <Link
                   href="/signup"
-                  className="flex-1 text-center py-2.5 text-[#8b96b8] rounded-xl hover:text-white transition-colors"
+                  prefetch
+                  className="flex-1 text-center py-2.5 text-[#8b96b8] rounded-xl hover:text-white transition-colors touch-manipulation select-none"
                 >
                   Create Account
                 </Link>

@@ -4,7 +4,7 @@ import { useRouter } from 'next/navigation'
 import { createClient } from '@/lib/supabase/client'
 import { redirectIfAuthenticated } from '@/lib/authRouting'
 import { Juwa2AuthShell } from '@/components/Juwa2AuthShell'
-import { AUTH_INPUT, AUTH_LABEL, AUTH_BUTTON, keepAuthButtonClick } from '@/lib/authUi'
+import { AUTH_INPUT, AUTH_LABEL, AUTH_BUTTON, runAuthButtonAction } from '@/lib/authUi'
 import { Eye, EyeOff, ArrowLeft, Loader2 } from 'lucide-react'
 import clsx from 'clsx'
 import { Turnstile, type TurnstileInstance } from '@marsidev/react-turnstile'
@@ -472,8 +472,7 @@ export default function SignUpPage() {
 
               <button
                 type="button"
-                onPointerDown={keepAuthButtonClick}
-                onClick={handleSendVerificationCode}
+                onPointerDown={(e) => runAuthButtonAction(e, handleSendVerificationCode)}
                 disabled={loading}
                 aria-disabled={loading || !canContinueStep1}
                 className={clsx(
@@ -555,8 +554,7 @@ export default function SignUpPage() {
 
               <button
                 type="button"
-                onPointerDown={keepAuthButtonClick}
-                onClick={() => void verifyAndContinue()}
+                onPointerDown={(e) => runAuthButtonAction(e, () => void verifyAndContinue())}
                 disabled={loading}
                 className={clsx(
                   'w-full py-3 rounded-xl bg-gradient-to-r from-[#d4af37] to-[#b8860b] text-white font-semibold hover:opacity-90 transition-opacity disabled:opacity-40 flex items-center justify-center gap-2',
@@ -599,8 +597,7 @@ export default function SignUpPage() {
               {error && <p className="text-red-400 text-sm mb-3">{error}</p>}
               <button
                 type="button"
-                onPointerDown={keepAuthButtonClick}
-                onClick={() => void register()}
+                onPointerDown={(e) => runAuthButtonAction(e, () => void register())}
                 disabled={loading}
                 className={clsx(
                   'w-full py-3 rounded-xl juwa2-btn font-semibold hover:opacity-95 transition-opacity flex items-center justify-center gap-2',

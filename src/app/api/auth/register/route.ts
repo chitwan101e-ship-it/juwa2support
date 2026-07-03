@@ -6,6 +6,11 @@ import { notifyEveryBusinessAdmin } from '@/lib/notifyStaffAdmins'
 import { sendApprovalWelcomeMessage } from '@/lib/approvalWelcomeMessage'
 import { sendAccountApprovedEmail } from '@/lib/sendApprovalEmail'
 import { resolvePrimaryBusinessForSignup } from '@/lib/resolvePrimaryBusiness'
+import { ensureSupportConversation } from '@/lib/ensureSupportConversation'
+import {
+  assignConversationInboxLabel,
+  INBOX_LABEL_WEBSITE,
+} from '@/lib/assignConversationInboxLabel'
 import { getClientIp } from '@/lib/clientIp'
 import { rateLimitRegister } from '@/lib/authRateLimit'
 import { verifyTurnstileToken } from '@/lib/verifyTurnstile'
@@ -192,6 +197,7 @@ export async function POST(req: NextRequest) {
       business_role: null,
       account_status: 'approved',
       email_verified: otpEnabled,
+      signup_source: 'website',
     })
 
     if (profileErr) {
@@ -250,6 +256,16 @@ export async function POST(req: NextRequest) {
           username: cleanUsername,
           businessName: primaryBiz.name,
         })
+      }
+
+      const ensured = await ensureSupportConversation(supabase, primaryBiz.id, userId)
+      if (!('error' in ensured)) {
+        await assignConversationInboxLabel(
+          supabase,
+          primaryBiz.id,
+          ensured.conversationId,
+          INBOX_LABEL_WEBSITE
+        )
       }
 
       const emailKey = String(email).trim().toLowerCase()

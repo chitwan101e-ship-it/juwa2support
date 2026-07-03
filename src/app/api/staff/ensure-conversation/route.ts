@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { createClient, createServiceClient } from '@/lib/supabase/server'
+import { assignChannelLabelForCustomer } from '@/lib/assignConversationInboxLabel'
 import { ensureSupportConversation } from '@/lib/ensureSupportConversation'
 
 /** Creates (or returns) a support thread so staff can message an active member first. */
@@ -83,6 +84,13 @@ export async function POST(req: NextRequest) {
     if ('error' in ensured) {
       return NextResponse.json({ error: ensured.error }, { status: 500 })
     }
+
+    await assignChannelLabelForCustomer(
+      admin,
+      businessId,
+      ensured.conversationId,
+      customerId
+    )
 
     return NextResponse.json({ conversationId: ensured.conversationId })
   } catch (e) {

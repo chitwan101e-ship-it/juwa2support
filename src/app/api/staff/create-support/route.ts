@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { createClient, createServiceClient } from '@/lib/supabase/server'
 import { isValidStaffUsername, normalizeStaffUsername } from '@/lib/staffAuthEmail'
+import { parseSupportInboxScope } from '@/lib/supportInboxScope'
 import { withTimeout } from '@/lib/withTimeout'
 
 export const runtime = 'nodejs'
@@ -22,6 +23,7 @@ export async function POST(req: NextRequest) {
       username?: string
       password?: string
       confirmPassword?: string
+      inboxScope?: string
     }
 
     const firstName = typeof body.firstName === 'string' ? body.firstName.trim() : ''
@@ -166,6 +168,7 @@ export async function POST(req: NextRequest) {
         role: 'business',
         business_id: businessId,
         business_role: 'support',
+        support_inbox_scope: parseSupportInboxScope(body.inboxScope) ?? 'both',
         account_status: 'approved',
         email_verified: true,
       }),

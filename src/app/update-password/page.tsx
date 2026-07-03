@@ -6,7 +6,7 @@ import { useRouter } from 'next/navigation'
 import { createClient } from '@/lib/supabase/client'
 import Juwa2Logo from '@/components/Juwa2Logo'
 import { Loader2, Eye, EyeOff } from 'lucide-react'
-import { AUTH_BUTTON, keepAuthButtonClick } from '@/lib/authUi'
+import { AUTH_BUTTON, runAuthButtonAction } from '@/lib/authUi'
 
 const inp =
   'w-full px-3 py-2.5 border border-white/10 bg-[#141414] text-white placeholder:text-[#6f7896] rounded-lg text-sm focus:border-[#d4af37] focus:ring-4 focus:ring-[#d4af37]/20 focus:outline-none transition-all'
@@ -21,8 +21,8 @@ export default function UpdatePasswordPage() {
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState('')
 
-  async function onSubmit(e: React.FormEvent) {
-    e.preventDefault()
+  async function onSubmit(e?: React.FormEvent) {
+    e?.preventDefault()
     if (loading) return
     setError('')
     if (password.length < 8) {
@@ -98,9 +98,9 @@ export default function UpdatePasswordPage() {
           </div>
 
           <button
-            type="submit"
+            type="button"
             disabled={loading}
-            onPointerDown={keepAuthButtonClick}
+            onPointerDown={(e) => runAuthButtonAction(e, () => void onSubmit())}
             className={`w-full py-3 rounded-xl bg-[#d4af37] hover:bg-[#6d4ee6] font-semibold text-white disabled:opacity-50 flex items-center justify-center gap-2 ${AUTH_BUTTON}`}
           >
             {loading ? <Loader2 className="w-5 h-5 animate-spin" /> : null}

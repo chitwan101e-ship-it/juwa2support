@@ -2,6 +2,10 @@ import type { SupabaseClient } from '@supabase/supabase-js'
 import crypto from 'crypto'
 import { sendApprovalWelcomeMessage } from '@/lib/approvalWelcomeMessage'
 import { ensureSupportConversation } from '@/lib/ensureSupportConversation'
+import {
+  assignConversationInboxLabel,
+  INBOX_LABEL_JUWA_APP,
+} from '@/lib/assignConversationInboxLabel'
 import { normalizePhoneForDedup } from '@/lib/phoneNormalize'
 import { resolvePrimaryBusinessForSignup } from '@/lib/resolvePrimaryBusiness'
 
@@ -121,6 +125,13 @@ async function linkCustomerToPrimaryBusiness(
   const ensured = await ensureSupportConversation(admin, primaryBiz.id, userId)
   if ('error' in ensured) {
     console.error('[provisionGameUser] conversation:', ensured.error)
+  } else {
+    await assignConversationInboxLabel(
+      admin,
+      primaryBiz.id,
+      ensured.conversationId,
+      INBOX_LABEL_JUWA_APP
+    )
   }
 
   if (sendWelcome && primaryBiz.staffSenderId) {
@@ -277,9 +288,10 @@ export async function provisionGameUser(
     role: 'customer',
     business_id: null,
     business_role: null,
-    account_status: 'approved',
-    email_verified: true,
-  })
+      account_status: 'approved',
+      email_verified: true,
+      signup_source: 'juwa_app',
+    })
 
   if (profileErr) {
     await admin.auth.admin.deleteUser(relayUserId)

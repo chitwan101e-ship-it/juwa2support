@@ -6,7 +6,7 @@ import { useRouter } from 'next/navigation'
 import { createClient } from '@/lib/supabase/client'
 import { finalizeSessionAfterSignIn, redirectIfAuthenticated } from '@/lib/authRouting'
 import { Juwa2AuthShell } from '@/components/Juwa2AuthShell'
-import { AUTH_INPUT, AUTH_LABEL, AUTH_BUTTON, keepAuthButtonClick } from '@/lib/authUi'
+import { AUTH_INPUT, AUTH_LABEL, AUTH_BUTTON, runAuthButtonAction } from '@/lib/authUi'
 import { Loader2, Eye, EyeOff } from 'lucide-react'
 
 export default function LoginPage() {
@@ -40,8 +40,8 @@ export default function LoginPage() {
     }
   }, [router, supabase])
 
-  async function onSubmit(e: React.FormEvent) {
-    e.preventDefault()
+  async function onSubmit(e?: React.FormEvent) {
+    e?.preventDefault()
     if (loading) return
     setError('')
     setLoading(true)
@@ -134,9 +134,9 @@ export default function LoginPage() {
         </div>
 
         <button
-          type="submit"
+          type="button"
           disabled={loading}
-          onPointerDown={keepAuthButtonClick}
+          onPointerDown={(e) => runAuthButtonAction(e, () => void onSubmit())}
           className={`w-full py-3 rounded-xl juwa2-btn hover:opacity-95 transition-opacity disabled:opacity-40 flex items-center justify-center gap-2 mt-1 ${AUTH_BUTTON}`}
         >
           {loading ? (

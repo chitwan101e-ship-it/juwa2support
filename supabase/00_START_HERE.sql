@@ -9,7 +9,11 @@
 --     2) Run  2_bootstrap.sql
 --     3) Run  3_extras.sql
 --     4) Run  5_game_sso.sql   (in-app game chat SSO)
---     5) Run  6_auto_approve_customers.sql  (instant customer signup approval)
+--     5) Run  6_channel_labels.sql  (Website / Juwa App inbox labels)
+--     6) Run  6b_backfill_channel_labels.sql  (tag existing threads — optional)
+--     7) Run  6_auto_approve_customers.sql  (instant customer signup approval)
+--     8) Run  7_unread_inbox_label.sql  (auto Unread label on unread customer messages)
+--     9) Run  8_staff_inbox_scope.sql  (assign support staff to Website / App / Both inboxes)
 --
 --   SCENARIO B — Bootstrap already ran; "already exists" / policy errors
 --     Run 3_extras.sql, 5_game_sso.sql, and 6_auto_approve_customers.sql as needed  (safe to re-run)

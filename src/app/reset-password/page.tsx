@@ -4,7 +4,7 @@ import { Suspense, useCallback, useEffect, useMemo, useRef, useState } from 'rea
 import Link from 'next/link'
 import { useRouter, useSearchParams } from 'next/navigation'
 import { Juwa2AuthShell } from '@/components/Juwa2AuthShell'
-import { AUTH_INPUT, AUTH_LABEL, AUTH_BUTTON, keepAuthButtonClick } from '@/lib/authUi'
+import { AUTH_INPUT, AUTH_LABEL, AUTH_BUTTON, runAuthButtonAction } from '@/lib/authUi'
 import { TURNSTILE_LOAD_ERROR } from '@/lib/userFacingErrors'
 import { Loader2, Eye, EyeOff, ArrowLeft } from 'lucide-react'
 import { Turnstile, type TurnstileInstance } from '@marsidev/react-turnstile'
@@ -82,8 +82,8 @@ function ResetPasswordInner() {
     }
   }, [identifier, showTurnstile, turnstileToken, loading])
 
-  async function submitNewPassword(e: React.FormEvent) {
-    e.preventDefault()
+  async function submitNewPassword(e?: React.FormEvent) {
+    e?.preventDefault()
     if (loading) return
     setError('')
     if (password.length < 8) {
@@ -180,8 +180,7 @@ function ResetPasswordInner() {
 
           <button
             type="button"
-            onPointerDown={keepAuthButtonClick}
-            onClick={() => void sendCode()}
+            onPointerDown={(e) => runAuthButtonAction(e, () => void sendCode())}
             disabled={loading}
             className={`w-full py-3 rounded-xl juwa2-btn font-semibold hover:opacity-95 transition-opacity disabled:opacity-40 flex items-center justify-center gap-2 ${AUTH_BUTTON}`}
           >
@@ -248,9 +247,9 @@ function ResetPasswordInner() {
           {error ? <p className="text-red-400 text-sm">{error}</p> : null}
           {info ? <p className="text-emerald-400/90 text-sm">{info}</p> : null}
           <button
-            type="submit"
+            type="button"
             disabled={loading}
-            onPointerDown={keepAuthButtonClick}
+            onPointerDown={(e) => runAuthButtonAction(e, () => void submitNewPassword())}
             className={`w-full py-3 rounded-xl juwa2-btn font-semibold hover:opacity-95 transition-opacity disabled:opacity-40 flex items-center justify-center gap-2 ${AUTH_BUTTON}`}
           >
             {loading ? (
