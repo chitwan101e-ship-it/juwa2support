@@ -315,6 +315,15 @@ export default function NotificationsPage() {
             ))}
           </div>
         )}
+
+        {portalRole === 'business' ? (
+          <footer className="mt-6 pt-4 border-t border-white/[0.08] flex flex-wrap items-center justify-between gap-2 text-[12px] text-[#6f7896]">
+            <span>Juwa2 Support Staff Console</span>
+            <span>
+              {new Date().getFullYear()} &copy; All rights reserved. <span className="text-[#8892b0]">v1.0.0</span>
+            </span>
+          </footer>
+        ) : null}
       </main>
 
       {portalRole === 'customer' ? (

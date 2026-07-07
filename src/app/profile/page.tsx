@@ -300,6 +300,12 @@ export default function ProfilePage() {
         >
           Sign out
         </button>
+
+        {profile.role === 'business' ? (
+          <footer className="mt-6 pt-4 border-t border-white/[0.08] text-center text-[12px] text-[#6f7896]">
+            Juwa2 Support Staff Console · <span className="text-[#8892b0]">v1.0.0</span>
+          </footer>
+        ) : null}
       </main>
 
       {profile.role === 'customer' ? (
