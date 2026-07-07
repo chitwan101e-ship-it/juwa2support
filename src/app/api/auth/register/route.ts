@@ -1,5 +1,5 @@
 // src/app/api/auth/register/route.ts
-import { NextRequest, NextResponse } from 'next/server'
+import { after, NextRequest, NextResponse } from 'next/server'
 import { createServiceClient } from '@/lib/supabase/server'
 import { normalizePhoneForDedup } from '@/lib/phoneNormalize'
 import { notifyEveryBusinessAdmin } from '@/lib/notifyStaffAdmins'
@@ -228,61 +228,92 @@ export async function POST(req: NextRequest) {
         .eq('id', primaryBiz.id)
         .maybeSingle()
       subdomain = (bizRow?.slug as string | undefined) ?? null
-
-      const { error: fErr } = await supabase.from('follows').insert({
-        user_id: userId,
-        business_id: primaryBiz.id,
-      })
-      if (fErr && fErr.code !== '23505') {
-        console.error('[register] follow insert:', fErr)
-      }
-
-      const { error: nErr } = await supabase.from('notifications').insert({
-        user_id: userId,
-        business_id: primaryBiz.id,
-        type: 'account_approved',
-        title: 'Welcome to JUWA2 Support',
-        body: `You're all set. Open your feed for updates from ${primaryBiz.name}.`,
-        link: '/feed',
-      })
-      if (nErr) console.error('[register] welcome notification:', nErr)
-
-      if (primaryBiz.staffSenderId) {
-        await sendApprovalWelcomeMessage(supabase, {
-          businessId: primaryBiz.id,
-          customerId: userId,
-          staffSenderId: primaryBiz.staffSenderId,
-          customerName,
-          username: cleanUsername,
-          businessName: primaryBiz.name,
-        })
-      }
-
-      const ensured = await ensureSupportConversation(supabase, primaryBiz.id, userId)
-      if (!('error' in ensured)) {
-        await assignConversationInboxLabel(
-          supabase,
-          primaryBiz.id,
-          ensured.conversationId,
-          INBOX_LABEL_WEBSITE
-        )
-      }
-
-      const emailKey = String(email).trim().toLowerCase()
-      if (emailKey.includes('@')) {
-        await sendAccountApprovedEmail({
-          to: emailKey,
-          customerName,
-          username: cleanUsername,
-          businessName: primaryBiz.name,
-        })
-      }
     }
 
-    await notifyEveryBusinessAdmin(supabase, {
-      title: 'New customer joined',
-      body: `@${cleanUsername} (${firstName} ${lastName}) — phone: ${String(phone).trim()}${referral ? ` — referral: @${referral}` : ''}${question ? ` — question: "${question.slice(0, 120)}${question.length > 120 ? '…' : ''}"` : ''}.`,
-      link: '/notifications',
+    const emailKey = String(email).trim().toLowerCase()
+    const phoneStr = String(phone).trim()
+    const signupSideEffects = {
+      userId,
+      cleanUsername,
+      customerName,
+      firstName: String(firstName),
+      lastName: String(lastName),
+      emailKey,
+      phoneStr,
+      referral,
+      question,
+      primaryBiz,
+    }
+
+    after(async () => {
+      try {
+        const bg = createServiceClient()
+        const {
+          userId: uid,
+          cleanUsername: uname,
+          customerName: cname,
+          firstName: fname,
+          lastName: lname,
+          emailKey: ekey,
+          phoneStr: pstr,
+          referral: ref,
+          question: q,
+          primaryBiz: biz,
+        } = signupSideEffects
+
+        if (biz) {
+          const { error: fErr } = await bg.from('follows').insert({
+            user_id: uid,
+            business_id: biz.id,
+          })
+          if (fErr && fErr.code !== '23505') {
+            console.error('[register:after] follow insert:', fErr)
+          }
+
+          const { error: nErr } = await bg.from('notifications').insert({
+            user_id: uid,
+            business_id: biz.id,
+            type: 'account_approved',
+            title: 'Welcome to JUWA2 Support',
+            body: `You're all set. Open your feed for updates from ${biz.name}.`,
+            link: '/feed',
+          })
+          if (nErr) console.error('[register:after] welcome notification:', nErr)
+
+          if (biz.staffSenderId) {
+            await sendApprovalWelcomeMessage(bg, {
+              businessId: biz.id,
+              customerId: uid,
+              staffSenderId: biz.staffSenderId,
+              customerName: cname,
+              username: uname,
+              businessName: biz.name,
+            })
+          }
+
+          const ensured = await ensureSupportConversation(bg, biz.id, uid)
+          if (!('error' in ensured)) {
+            await assignConversationInboxLabel(bg, biz.id, ensured.conversationId, INBOX_LABEL_WEBSITE)
+          }
+
+          if (ekey.includes('@')) {
+            await sendAccountApprovedEmail({
+              to: ekey,
+              customerName: cname,
+              username: uname,
+              businessName: biz.name,
+            })
+          }
+        }
+
+        await notifyEveryBusinessAdmin(bg, {
+          title: 'New customer joined',
+          body: `@${uname} (${fname} ${lname}) — phone: ${pstr}${ref ? ` — referral: @${ref}` : ''}${q ? ` — question: "${q.slice(0, 120)}${q.length > 120 ? '…' : ''}"` : ''}.`,
+          link: '/notifications',
+        })
+      } catch (e) {
+        console.error('[register:after]', e)
+      }
     })
 
     return NextResponse.json({

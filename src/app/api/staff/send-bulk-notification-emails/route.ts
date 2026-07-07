@@ -1,9 +1,13 @@
+import { after } from 'next/server'
 import { NextRequest, NextResponse } from 'next/server'
 import { createClient, createServiceClient } from '@/lib/supabase/server'
 import { getApprovedCustomerIdsForInboxLabelPresets } from '@/lib/inboxLabelRecipients'
 import { sendBulkCustomerNotificationEmails } from '@/lib/sendBulkCustomerNotificationEmails'
 
 const MAX_RECIPIENTS = 500
+
+/** Background bulk email can run longer than the HTTP response (Vercel Pro: up to 300s). */
+export const maxDuration = 300
 
 export async function POST(req: NextRequest) {
   try {
@@ -88,7 +92,7 @@ export async function POST(req: NextRequest) {
       )
     }
 
-    const result = await sendBulkCustomerNotificationEmails(admin, {
+    const emailOpts = {
       userIds,
       subject,
       title,
@@ -96,9 +100,28 @@ export async function POST(req: NextRequest) {
       linkPath,
       ctaLabel: body.ctaLabel,
       brandName: body.brandName,
+    }
+
+    after(async () => {
+      try {
+        const result = await sendBulkCustomerNotificationEmails(createServiceClient(), emailOpts)
+        console.info('[bulk-notification-email:done]', {
+          recipientCount: userIds.length,
+          ...result,
+        })
+      } catch (e) {
+        console.error('[bulk-notification-email:after]', e)
+      }
     })
 
-    return NextResponse.json({ ok: true, recipientCount: userIds.length, ...result })
+    return NextResponse.json({
+      ok: true,
+      status: 'processing',
+      recipientCount: userIds.length,
+      sent: 0,
+      skipped: 0,
+      failed: 0,
+    })
   } catch (e) {
     const msg = e instanceof Error ? e.message : 'Server error'
     return NextResponse.json({ error: msg }, { status: 500 })

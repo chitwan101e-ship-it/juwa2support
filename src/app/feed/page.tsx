@@ -1066,15 +1066,6 @@ export default function FeedPage() {
       }, 300)
     }
 
-    let msgDebounce: number | null = null
-    const queueMessagingRefresh = () => {
-      if (msgDebounce) window.clearTimeout(msgDebounce)
-      msgDebounce = window.setTimeout(() => {
-        void refreshMessagingUI(customerId)
-        void loadUnreadNotifications(customerId)
-      }, 350)
-    }
-
     const channel = supabase
       .channel(`customer-feed-${customerId}`)
       .on('postgres_changes', { event: '*', schema: 'public', table: 'announcements' }, queueFeedRefresh)
@@ -1085,8 +1076,6 @@ export default function FeedPage() {
         { event: '*', schema: 'public', table: 'notifications', filter: `user_id=eq.${customerId}` },
         () => void loadUnreadNotifications(customerId)
       )
-      .on('postgres_changes', { event: 'INSERT', schema: 'public', table: 'messages' }, queueMessagingRefresh)
-      .on('postgres_changes', { event: 'UPDATE', schema: 'public', table: 'messages' }, queueMessagingRefresh)
       .on(
         'postgres_changes',
         { event: '*', schema: 'public', table: 'follows', filter: `user_id=eq.${customerId}` },
@@ -1104,7 +1093,6 @@ export default function FeedPage() {
 
     return () => {
       if (timer) window.clearTimeout(timer)
-      if (msgDebounce) window.clearTimeout(msgDebounce)
       void supabase.removeChannel(channel)
     }
   }, [supabase, profile?.id, loadAnnouncements, loadUnreadNotifications, refreshMessagingUI])

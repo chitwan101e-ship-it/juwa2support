@@ -7,7 +7,6 @@ import Link from 'next/link'
 import { createClient } from '@/lib/supabase/client'
 import { markConversationNotificationsRead } from '@/lib/markConversationNotificationsRead'
 import { downscaleImageFileToJpeg } from '@/lib/downscaleImageFile'
-import Juwa2Logo from '@/components/Juwa2Logo'
 import { JUWA2_BRAND } from '@/lib/juwa2Theme'
 import { ChatBubbleIcon } from '@/components/ChatBubbleIcon'
 import {
@@ -16,7 +15,10 @@ import {
   Bell,
   Camera,
   Check,
+  ChevronRight,
   ClipboardList,
+  Maximize2,
+  Menu,
   ImagePlus,
   Inbox,
   Loader2,
@@ -356,6 +358,8 @@ function threadMatchesUnreadFilter(item: ConvoListItem, unreadLabelId: string): 
   return item.unreadCount > 0 || item.labels.some((l) => l.preset_key === INBOX_LABEL_UNREAD || l.id === unreadLabelId)
 }
 
+const APP_VERSION = '1.0.0'
+
 const NAV_DEF: {
   id: AppTab
   label: string
@@ -419,6 +423,7 @@ export default function DashboardPage() {
   const [activeTab, setActiveTab] = useState<AppTab>('home')
   const activeTabRef = useRef<AppTab>('home')
   activeTabRef.current = activeTab
+  const [sidebarCollapsed, setSidebarCollapsed] = useState(false)
 
   const [convoList, setConvoList] = useState<ConvoListItem[]>([])
   const convoListRef = useRef<ConvoListItem[]>([])
@@ -431,6 +436,15 @@ export default function DashboardPage() {
   /** Only mark customer messages read while the admin is on Inbox viewing this thread. */
   function isActivelyViewingInboxThread(conversationId: string) {
     return isInboxTab(activeTabRef.current) && selectedConvoIdRef.current === conversationId
+  }
+
+  function toggleFullscreen() {
+    if (typeof document === 'undefined') return
+    if (!document.fullscreenElement) {
+      document.documentElement.requestFullscreen?.().catch(() => {})
+    } else {
+      document.exitFullscreen?.().catch(() => {})
+    }
   }
 
   function resolveInboxTabForConversation(conversationId: string): AppTab {
@@ -1423,7 +1437,7 @@ export default function DashboardPage() {
       timer = window.setTimeout(() => {
         const current = profileRef.current
         if (current?.business_id) void refreshDashboard(current)
-      }, 100)
+      }, 350)
     }
 
     const channel = supabase
@@ -1431,8 +1445,6 @@ export default function DashboardPage() {
       .on('postgres_changes', { event: '*', schema: 'public', table: 'conversations', filter: `business_id=eq.${p.business_id}` }, queueRefresh)
       .on('postgres_changes', { event: '*', schema: 'public', table: 'admin_reports', filter: `business_id=eq.${p.business_id}` }, queueRefresh)
       .on('postgres_changes', { event: '*', schema: 'public', table: 'follows', filter: `business_id=eq.${p.business_id}` }, queueRefresh)
-      .on('postgres_changes', { event: '*', schema: 'public', table: 'messages' }, queueRefresh)
-      .on('postgres_changes', { event: '*', schema: 'public', table: 'profiles' }, queueRefresh)
       .on('postgres_changes', { event: '*', schema: 'public', table: 'conversation_inbox_labels' }, queueRefresh)
       .on('postgres_changes', { event: '*', schema: 'public', table: 'conversation_escalations', filter: `business_id=eq.${p.business_id}` }, queueRefresh)
       .on('postgres_changes', { event: '*', schema: 'public', table: 'inbox_label_definitions' }, queueRefresh)
@@ -2798,7 +2810,7 @@ export default function DashboardPage() {
     body: string
     linkPath: string
     ctaLabel?: string
-  }): Promise<{ sent: number; skipped: number; failed: number; recipientCount?: number } | null> {
+  }): Promise<{ sent: number; skipped: number; failed: number; recipientCount?: number; processing?: boolean } | null> {
     if (!payload.labelPresetKeys?.length && !payload.userIds?.length) return null
     try {
       const brandName = businessInfo?.name || JUWA2_BRAND
@@ -2812,13 +2824,20 @@ export default function DashboardPage() {
         skipped?: number
         failed?: number
         recipientCount?: number
+        status?: string
         error?: string
       }
       if (!res.ok) {
         console.error('[send-bulk-notification-emails]', j.error || res.status)
         return null
       }
-      return { sent: j.sent ?? 0, skipped: j.skipped ?? 0, failed: j.failed ?? 0, recipientCount: j.recipientCount }
+      return {
+        sent: j.sent ?? 0,
+        skipped: j.skipped ?? 0,
+        failed: j.failed ?? 0,
+        recipientCount: j.recipientCount,
+        processing: j.status === 'processing',
+      }
     } catch (e) {
       console.error(e)
       return null
@@ -2874,7 +2893,7 @@ export default function DashboardPage() {
         .is('deleted_at', null)
 
       let notificationsOk = true
-      let emailResult: { sent: number; skipped: number; failed: number; recipientCount?: number } | null = null
+      let emailResult: { sent: number; skipped: number; failed: number; recipientCount?: number; processing?: boolean } | null = null
       if (custErr) {
         console.error(custErr)
         notificationsOk = false
@@ -2930,6 +2949,8 @@ export default function DashboardPage() {
         let emailLine = ''
         if (emailResult === null) {
           emailLine = ' Email could not be sent — check server logs.'
+        } else if (emailResult.processing && (emailResult.recipientCount ?? 0) > 0) {
+          emailLine = ` Emails are being sent in the background to ${emailResult.recipientCount} recipient(s).`
         } else if (emailTargets === 0) {
           emailLine = ' No customers with Active player or Account created labels to email.'
         } else {
@@ -3109,7 +3130,9 @@ export default function DashboardPage() {
       setNotifyAudienceLabelIds([])
       setNotifyRecipientQuery('')
       const emailNote = emailResult
-        ? ` ${emailResult.sent} email(s) sent${emailResult.skipped ? ` (${emailResult.skipped} skipped — no address)` : ''}.`
+        ? emailResult.processing
+          ? ` Emails are being sent in the background to ${emailResult.recipientCount ?? 0} recipient(s).`
+          : ` ${emailResult.sent} email(s) sent${emailResult.skipped ? ` (${emailResult.skipped} skipped — no address)` : ''}.`
         : ''
       alert(
         `Sent ${rows.length} in-app notification(s). Customers also receive email where an address is on file.${emailNote}`
@@ -3536,152 +3559,172 @@ export default function DashboardPage() {
         : staffInboxScope
           ? `Support · ${supportScopeShortLabel(staffInboxScope)}`
           : 'Support'
-  const headerSub = `@${profile.username} · ${staffRoleLabel}`
   const selectedEscalation = selectedConvoId ? escalationByConvoId[selectedConvoId] ?? null : null
 
   return (
-    <div className="min-h-screen lg:h-screen lg:overflow-hidden text-[14px] leading-snug text-white antialiased bg-[radial-gradient(ellipse_at_top_left,_#0f1840_0%,_#070a18_45%,_#000000_100%)] lg:grid lg:grid-cols-[220px_1fr]">
-      <aside className="hidden lg:flex lg:h-full lg:min-h-0 flex-col border-r border-white/[0.08] bg-[rgba(8,13,28,0.95)] py-3 px-2.5 gap-0.5 overflow-y-auto">
-        <div className="admin-sidebar-top px-2 pb-3">
-          <p className="text-[9px] font-bold uppercase tracking-[0.22em] text-[#4e5a7a] mb-2">Staff Portal</p>
-          <div className="mb-3">
-            <Juwa2Logo size="md" theme="dark" className="[&>div]:!w-[176px] [&>div]:!h-[85px]" />
-          </div>
-          <div className="flex items-center gap-2.5">
-            <div className="relative shrink-0">
-              <input
-                ref={staffAvatarInputRef}
-                type="file"
-                accept="image/*"
-                className="hidden"
-                onChange={(e) => void onStaffAvatarPick(e)}
-              />
-              <div className="w-9 h-9 rounded-full overflow-hidden border border-white/[0.08] bg-[#1a2550] flex items-center justify-center text-xs font-bold text-white">
-                {profile.avatar_url ? (
-                  <img src={profile.avatar_url} alt={`${profile.username} avatar`} className="w-full h-full object-cover" />
-                ) : (
-                  profile.username.slice(0, 2).toUpperCase()
-                )}
-              </div>
-              {staffAvatarBusy ? (
-                <div
-                  className="absolute inset-0 flex items-center justify-center rounded-full bg-black/55 ring-1 ring-black/20"
-                  aria-live="polite"
-                >
-                  <Loader2 className="w-4 h-4 animate-spin text-white" aria-hidden />
-                </div>
-              ) : null}
-              <button
-                type="button"
-                onClick={() => staffAvatarInputRef.current?.click()}
-                disabled={staffAvatarBusy}
-                className="absolute left-[95.18%] top-[95.18%] z-[1] flex h-5 w-5 -translate-x-1/2 -translate-y-1/2 items-center justify-center rounded-full border border-white/20 bg-black/35 text-white shadow-sm backdrop-blur-sm hover:bg-black/50 hover:border-white/30 active:scale-95 disabled:pointer-events-none disabled:opacity-40 transition-colors"
-                aria-label="Change profile photo"
-                title="Change profile photo"
-              >
-                <Camera className="h-2.5 w-2.5" strokeWidth={2.5} aria-hidden />
-              </button>
+    <div className={`admin-shell min-h-screen lg:h-screen lg:overflow-hidden text-[14px] leading-snug text-white antialiased bg-[radial-gradient(ellipse_at_top_left,_#0f1840_0%,_#070a18_45%,_#000000_100%)] lg:grid ${sidebarCollapsed ? 'lg:grid-cols-[68px_1fr]' : 'lg:grid-cols-[236px_1fr]'}`}>
+      <aside className="admin-sidebar hidden lg:flex lg:h-full lg:min-h-0 flex-col border-r border-white/[0.08] bg-[rgba(8,13,28,0.95)] overflow-hidden">
+        <div className={`flex items-center gap-2.5 h-14 shrink-0 border-b border-white/[0.06] ${sidebarCollapsed ? 'justify-center px-2' : 'px-3'}`}>
+          <div className="relative shrink-0">
+            <input
+              ref={staffAvatarInputRef}
+              type="file"
+              accept="image/*"
+              className="hidden"
+              onChange={(e) => void onStaffAvatarPick(e)}
+            />
+            <div className="w-9 h-9 rounded-full overflow-hidden border border-white/[0.08] bg-[#1a2550] flex items-center justify-center text-xs font-bold text-white">
+              {profile.avatar_url ? (
+                <img src={profile.avatar_url} alt={`${profile.username} avatar`} className="w-full h-full object-cover" />
+              ) : (
+                profile.username.slice(0, 2).toUpperCase()
+              )}
             </div>
+            {staffAvatarBusy ? (
+              <div
+                className="absolute inset-0 flex items-center justify-center rounded-full bg-black/55 ring-1 ring-black/20"
+                aria-live="polite"
+              >
+                <Loader2 className="w-4 h-4 animate-spin text-white" aria-hidden />
+              </div>
+            ) : null}
+            <button
+              type="button"
+              onClick={() => staffAvatarInputRef.current?.click()}
+              disabled={staffAvatarBusy}
+              className="absolute left-[95.18%] top-[95.18%] z-[1] flex h-5 w-5 -translate-x-1/2 -translate-y-1/2 items-center justify-center rounded-full border border-white/20 bg-black/35 text-white shadow-sm backdrop-blur-sm hover:bg-black/50 hover:border-white/30 active:scale-95 disabled:pointer-events-none disabled:opacity-40 transition-colors"
+              aria-label="Change profile photo"
+              title="Change profile photo"
+            >
+              <Camera className="h-2.5 w-2.5" strokeWidth={2.5} aria-hidden />
+            </button>
+          </div>
+          {!sidebarCollapsed ? (
             <div className="min-w-0">
               <p className="text-[13px] font-semibold text-white truncate">{profile.username}</p>
-              <p className="text-[11px] text-[#8892b0] truncate">
-                @{profile.username} · {staffRoleLabel}
+              <p className="text-[11px] text-[#8892b0] truncate flex items-center gap-1.5">
+                <span className="w-1.5 h-1.5 rounded-full bg-[#2fd17f] shrink-0" aria-hidden />
+                {staffRoleLabel}
               </p>
             </div>
-          </div>
+          ) : null}
         </div>
-        <nav className="flex flex-col gap-0.5 flex-1 min-h-0">
+        <nav className="flex flex-col gap-0.5 flex-1 min-h-0 overflow-y-auto px-2.5 py-3">
+          {!sidebarCollapsed ? (
+            <p className="admin-nav-section px-1.5 pb-1.5">Main navigation</p>
+          ) : null}
           {navItems.map((item) => {
             const Icon = item.icon
             const active = item.id === activeTab
+            const badgeCount =
+              item.id === 'inbox-website'
+                ? inboxWebsiteUnreadTotal
+                : item.id === 'inbox-app'
+                  ? inboxAppUnreadTotal
+                  : item.id === 'inbox-technical'
+                    ? inboxTechnicalUnreadTotal
+                    : 0
+            const badgeColor = item.id === 'inbox-technical' ? 'bg-[#f97316]' : 'bg-[#f5d040]'
             return (
               <button
                 key={item.id}
                 type="button"
+                title={sidebarCollapsed ? item.label : undefined}
                 onClick={() => {
                   setActiveTab(item.id)
                 }}
-                className={`w-full flex items-center gap-2.5 px-2.5 py-2 rounded-xl border text-left text-[13px] font-medium transition-all ${
-                  active
-                    ? 'border-[rgba(141,99,255,0.4)] bg-[rgba(141,99,255,0.1)] text-white shadow-[0_4px_16px_-8px_rgba(124,90,246,0.4)]'
-                    : 'border-transparent text-[#8892b0] hover:bg-white/[0.04] hover:text-[#c4cbe6]'
-                }`}
+                className={`admin-nav-link ${active ? 'is-active' : ''} ${sidebarCollapsed ? 'justify-center !px-0' : ''}`}
               >
-                <Icon className="w-[15px] h-[15px] shrink-0 opacity-90" />
-                <span className="flex-1 min-w-0">{item.label}</span>
-                {item.id === 'inbox-website' && inboxWebsiteUnreadTotal > 0 ? (
-                  <span className="shrink-0 min-w-4 h-4 px-1 rounded-full bg-[#f5d040] text-white text-[9px] font-bold flex items-center justify-center tabular-nums">
-                    {inboxWebsiteUnreadTotal > 99 ? '99+' : inboxWebsiteUnreadTotal}
-                  </span>
-                ) : null}
-                {item.id === 'inbox-app' && inboxAppUnreadTotal > 0 ? (
-                  <span className="shrink-0 min-w-4 h-4 px-1 rounded-full bg-[#f5d040] text-white text-[9px] font-bold flex items-center justify-center tabular-nums">
-                    {inboxAppUnreadTotal > 99 ? '99+' : inboxAppUnreadTotal}
-                  </span>
-                ) : null}
-                {item.id === 'inbox-technical' && inboxTechnicalUnreadTotal > 0 ? (
-                  <span className="shrink-0 min-w-4 h-4 px-1 rounded-full bg-[#f97316] text-white text-[9px] font-bold flex items-center justify-center tabular-nums">
-                    {inboxTechnicalUnreadTotal > 99 ? '99+' : inboxTechnicalUnreadTotal}
+                <span className="relative inline-flex shrink-0">
+                  <Icon className="w-[16px] h-[16px] opacity-90" />
+                  {sidebarCollapsed && badgeCount > 0 ? (
+                    <span className={`absolute -top-1 -right-1 w-2 h-2 rounded-full ${badgeColor}`} />
+                  ) : null}
+                </span>
+                {!sidebarCollapsed ? <span className="flex-1 min-w-0">{item.label}</span> : null}
+                {!sidebarCollapsed && badgeCount > 0 ? (
+                  <span className={`shrink-0 min-w-4 h-4 px-1 rounded-full ${badgeColor} text-black text-[9px] font-bold flex items-center justify-center tabular-nums`}>
+                    {badgeCount > 99 ? '99+' : badgeCount}
                   </span>
                 ) : null}
               </button>
             )
           })}
         </nav>
-        <button
-          type="button"
-          onClick={() => void signOut()}
-          className="mt-auto flex items-center gap-2 text-left text-[12px] text-[#4e5a7a] hover:text-[#c4cbe6] px-2.5 py-2 transition-colors"
-        >
-          <LogOut className="w-3.5 h-3.5 shrink-0" />
-          Sign out
-        </button>
+        <div className="shrink-0 border-t border-white/[0.06] p-2.5">
+          <button
+            type="button"
+            onClick={() => void signOut()}
+            title={sidebarCollapsed ? 'Sign out' : undefined}
+            className={`admin-nav-link ${sidebarCollapsed ? 'justify-center !px-0' : ''}`}
+          >
+            <LogOut className="w-4 h-4 shrink-0" />
+            {!sidebarCollapsed ? <span>Sign out</span> : null}
+          </button>
+        </div>
       </aside>
 
       <main className="flex flex-col min-h-0 w-full min-h-screen lg:min-h-0 lg:h-full overflow-hidden pb-[max(4.25rem,env(safe-area-inset-bottom))] lg:pb-0">
-        <header className="shrink-0 flex flex-wrap items-center gap-2.5 border-b border-white/[0.08] bg-[rgba(11,18,40,0.9)] backdrop-blur-md px-3 py-2.5 sm:px-4">
+        <header className="shrink-0 flex items-center gap-2 h-14 border-b border-white/[0.08] bg-[rgba(11,18,40,0.9)] backdrop-blur-md px-3 sm:px-4">
+          <button
+            type="button"
+            onClick={() => setSidebarCollapsed((v) => !v)}
+            className="hidden lg:inline-flex h-9 w-9 shrink-0 items-center justify-center rounded-lg text-[#c4cbe6] hover:bg-white/[0.06] hover:text-white"
+            aria-label={sidebarCollapsed ? 'Expand sidebar' : 'Collapse sidebar'}
+            title="Toggle sidebar"
+          >
+            <Menu className="w-5 h-5" />
+          </button>
           <div className="flex-1 min-w-0">
-            <h2 className="text-[17px] font-bold tracking-[-0.02em] text-white leading-tight">{headerTitle}</h2>
-            <p className="text-[12px] text-[#8892b0] mt-0.5 leading-snug">{headerSub}</p>
-            {businessInfo?.slug ? (
-              <p className="text-[11px] text-[#4e5a7a] mt-1 font-mono truncate">
-                slug <span className="text-[#8892b0]">{businessInfo.slug}</span>
-              </p>
-            ) : null}
-            {!businessInfo && profile.business_id ? (
-              <p className="text-amber-200/90 text-xs mt-1">Could not load business record — check businesses table for this business_id.</p>
-            ) : null}
+            <h2 className="text-[16px] font-bold tracking-[-0.02em] text-white leading-tight truncate">{headerTitle}</h2>
+            <nav className="admin-breadcrumb mt-0.5" aria-label="Breadcrumb">
+              <button type="button" onClick={() => setActiveTab('home')} className="hover:text-[#c4cbe6]">
+                Home
+              </button>
+              <ChevronRight className="sep w-3 h-3" />
+              <span className="current truncate">{headerTitle}</span>
+            </nav>
           </div>
-          <div className="flex items-center gap-2 shrink-0">
+          <div className="flex items-center gap-1.5 shrink-0">
             <button
               type="button"
               onClick={() => router.push('/notifications')}
-              className="relative inline-flex h-[34px] w-[34px] items-center justify-center rounded-full border border-white/[0.08] bg-white/[0.06] text-[#c4cbe6] hover:bg-white/[0.10]"
+              className="relative inline-flex h-9 w-9 items-center justify-center rounded-lg text-[#c4cbe6] hover:bg-white/[0.06] hover:text-white"
               aria-label="Alerts"
+              title="Alerts"
             >
-              <Bell className="w-4 h-4" />
+              <Bell className="w-[18px] h-[18px]" />
               {staffNotifyUnread > 0 ? (
-                <span className="absolute -top-0.5 -right-0.5 min-w-4 h-4 px-1 rounded-full bg-[#ff3b5c] text-white text-[9px] font-bold flex items-center justify-center leading-none tabular-nums border-2 border-[#0b1228]">
+                <span className="absolute top-1 right-1 min-w-4 h-4 px-1 rounded-full bg-[#ff3b5c] text-white text-[9px] font-bold flex items-center justify-center leading-none tabular-nums border-2 border-[#0b1228]">
                   {staffNotifyUnread > 99 ? '99+' : staffNotifyUnread}
                 </span>
               ) : null}
             </button>
             <button
               type="button"
+              onClick={toggleFullscreen}
+              className="hidden sm:inline-flex h-9 w-9 items-center justify-center rounded-lg text-[#c4cbe6] hover:bg-white/[0.06] hover:text-white"
+              aria-label="Toggle fullscreen"
+              title="Fullscreen"
+            >
+              <Maximize2 className="w-[17px] h-[17px]" />
+            </button>
+            <button
+              type="button"
               onClick={() => void manualRefresh()}
               disabled={dashRefreshing || !profile.business_id}
-              className="inline-flex items-center gap-2 rounded-[10px] border border-white/[0.08] bg-white/[0.04] px-3 py-2 text-[13px] font-semibold text-[#c4cbe6] hover:text-white hover:bg-white/[0.06] disabled:opacity-40"
+              className="inline-flex items-center gap-2 rounded-lg border border-white/[0.08] bg-white/[0.04] px-2.5 py-2 text-[13px] font-semibold text-[#c4cbe6] hover:text-white hover:bg-white/[0.06] disabled:opacity-40"
             >
               <RefreshCw className={`w-4 h-4 ${dashRefreshing ? 'animate-spin' : ''}`} />
-              Refresh
+              <span className="hidden sm:inline">Refresh</span>
             </button>
             <button
               type="button"
               onClick={() => void signOut()}
-              className="lg:hidden inline-flex h-[34px] w-[34px] items-center justify-center rounded-full border border-white/[0.08] bg-white/[0.06] text-[#c4cbe6] hover:bg-white/[0.10] hover:text-white"
+              className="lg:hidden inline-flex h-9 w-9 items-center justify-center rounded-lg text-[#c4cbe6] hover:bg-white/[0.06] hover:text-white"
               aria-label="Sign out"
             >
-              <LogOut className="w-4 h-4" />
+              <LogOut className="w-[18px] h-[18px]" />
             </button>
           </div>
         </header>
@@ -3715,6 +3758,12 @@ export default function DashboardPage() {
                   here is usually connectivity or the dev server — not a database migration.
                 </p>
               ) : null}
+            </div>
+          ) : null}
+
+          {!businessInfo && profile.business_id ? (
+            <div className="rounded-xl border border-amber-500/40 bg-amber-500/10 px-3 py-2 text-[13px] text-amber-200/90">
+              Could not load business record — check the businesses table for this business_id.
             </div>
           ) : null}
 
@@ -3759,9 +3808,19 @@ export default function DashboardPage() {
                 <QuickButton icon={<Send className="w-4 h-4" />} label="Send Notify" onClick={() => setActiveTab('notify')} />
               )}
             </div>
-            <div className="rounded-2xl border border-white/[0.08] bg-[rgba(11,18,40,0.9)] overflow-hidden">
-              <div className="px-3 py-2 border-b border-white/[0.08]">
-                <h3 className="text-[10px] font-bold uppercase tracking-[0.16em] text-[#8892b0]">Recent Conversations</h3>
+            <div className="admin-card">
+              <div className="admin-card-header">
+                <Inbox className="w-4 h-4 text-[#f5d040]" />
+                <h3 className="admin-card-title">Recent Conversations</h3>
+                <div className="admin-card-tools">
+                  <button
+                    type="button"
+                    onClick={() => setActiveTab(staffInboxScope === 'app' ? 'inbox-app' : 'inbox-website')}
+                    className="text-[11px] font-semibold text-[#8892b0] hover:text-[#c4cbe6]"
+                  >
+                    View all
+                  </button>
+                </div>
               </div>
               <div className="divide-y divide-white/[0.08]">
                 {convoList.length === 0 ? (
@@ -6006,6 +6065,14 @@ export default function DashboardPage() {
         ) : null}
           </div>
         </div>
+        <footer className="admin-footer hidden lg:flex shrink-0">
+          <span>
+            <span className="text-[#8892b0] font-semibold">{businessInfo?.name || 'Juwa2 Support'}</span> Staff Console
+          </span>
+          <span>
+            {new Date().getFullYear()} &copy; All rights reserved. <span className="text-[#8892b0]">v{APP_VERSION}</span>
+          </span>
+        </footer>
       </main>
 
       <nav
