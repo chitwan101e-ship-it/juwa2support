@@ -55,7 +55,7 @@ export async function POST(req: NextRequest) {
       staff &&
       staff.role === 'business' &&
       staffBid === bid &&
-      (staff.business_role === 'admin' || staff.business_role === 'support')
+      (staff.business_role === 'admin' || staff.business_role === 'support' || staff.business_role === 'technical')
 
     if (!okStaff) {
       return NextResponse.json({ error: 'Forbidden' }, { status: 403 })

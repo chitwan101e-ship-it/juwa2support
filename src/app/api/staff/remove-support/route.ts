@@ -58,8 +58,8 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ error: 'That person is not on your team.' }, { status: 403 })
     }
 
-    if (target.business_role !== 'support') {
-      return NextResponse.json({ error: 'Only support agents can be removed here (not other admins).' }, { status: 400 })
+    if (target.business_role !== 'support' && target.business_role !== 'technical') {
+      return NextResponse.json({ error: 'Only support or technical agents can be removed here (not other admins).' }, { status: 400 })
     }
 
     if (target.deleted_at) {
@@ -72,7 +72,7 @@ export async function POST(req: NextRequest) {
       .update({ deleted_at: now })
       .eq('id', targetUserId)
       .eq('business_id', businessId)
-      .eq('business_role', 'support')
+      .in('business_role', ['support', 'technical'])
 
     if (updErr) {
       return NextResponse.json({ error: updErr.message }, { status: 500 })

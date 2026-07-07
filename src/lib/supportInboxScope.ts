@@ -16,10 +16,11 @@ export function parseSupportInboxScope(raw: unknown): SupportInboxScope | null {
 }
 
 export function effectiveSupportInboxScope(profile: {
-  business_role: 'admin' | 'support' | null
+  business_role: 'admin' | 'support' | 'technical' | null
   support_inbox_scope?: SupportInboxScope | null
-}): SupportInboxScope {
+}): SupportInboxScope | null {
   if (profile.business_role === 'admin') return 'both'
+  if (profile.business_role === 'technical') return null
   return profile.support_inbox_scope ?? 'both'
 }
 

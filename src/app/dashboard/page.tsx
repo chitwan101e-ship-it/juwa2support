@@ -3,6 +3,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import type { ChangeEvent, ComponentType, CSSProperties, ReactNode } from 'react'
 import { useRouter } from 'next/navigation'
+import Link from 'next/link'
 import { createClient } from '@/lib/supabase/client'
 import { markConversationNotificationsRead } from '@/lib/markConversationNotificationsRead'
 import { downscaleImageFileToJpeg } from '@/lib/downscaleImageFile'
@@ -11,6 +12,7 @@ import { JUWA2_BRAND } from '@/lib/juwa2Theme'
 import { ChatBubbleIcon } from '@/components/ChatBubbleIcon'
 import {
   ArrowLeft,
+  ArrowUpRight,
   Bell,
   Camera,
   Check,
@@ -40,6 +42,7 @@ import {
   User2,
   Users,
   UserCog,
+  Wrench,
   X,
 } from 'lucide-react'
 import { sharePostLink } from '@/lib/sharePostLink'
@@ -51,11 +54,18 @@ import { DesktopNotificationPrompt } from '@/components/DesktopNotificationPromp
 import { useDesktopMessageNotifications } from '@/hooks/useDesktopMessageNotifications'
 import {
   INBOX_LABEL_JUWA_APP,
+  INBOX_LABEL_TECHNICAL_ESCALATION,
   INBOX_LABEL_UNREAD,
   INBOX_LABEL_WEBSITE,
   isAutoManagedInboxLabelPreset,
   syncUnreadInboxLabelForConversation,
 } from '@/lib/assignConversationInboxLabel'
+import {
+  canClaimEscalation,
+  canEscalateThread,
+  canResolveEscalation,
+  type EscalationRow,
+} from '@/lib/technicalEscalation'
 import {
   conversationMatchesScope,
   defaultInboxTabForScope,
@@ -67,8 +77,9 @@ import {
   type InboxChannelTab,
   type SupportInboxScope,
 } from '@/lib/supportInboxScope'
+import { isChatComposerSubmitKey } from '@/lib/chatComposerKeyboard'
 
-type AppTab = 'home' | 'post' | InboxChannelTab | 'users' | 'notify' | 'reports' | 'team'
+type AppTab = 'home' | 'post' | InboxChannelTab | 'inbox-technical' | 'users' | 'notify' | 'reports' | 'team'
 type UsersPanelTab = 'pending' | 'active' | 'suspended'
 
 type ProfileRow = {
@@ -77,7 +88,7 @@ type ProfileRow = {
   username: string
   avatar_url?: string | null
   business_id: string | null
-  business_role: 'admin' | 'support' | null
+  business_role: 'admin' | 'support' | 'technical' | null
   support_inbox_scope?: SupportInboxScope | null
 }
 
@@ -112,7 +123,7 @@ type ThreadMessageSenderEmbed = {
   username: string
   first_name: string
   last_name: string
-  business_role: 'admin' | 'support' | null
+  business_role: 'admin' | 'support' | 'technical' | null
 }
 
 type ThreadMessage = {
@@ -123,11 +134,12 @@ type ThreadMessage = {
   image_url?: string | null
   read?: boolean | null
   read_at?: string | null
+  is_internal?: boolean
   profiles?: ThreadMessageSenderEmbed | ThreadMessageSenderEmbed[] | null
 }
 
 const THREAD_MESSAGE_SELECT =
-  'id, sender_id, body, created_at, image_url, read, read_at, profiles ( username, first_name, last_name, business_role )'
+  'id, sender_id, body, created_at, image_url, read, read_at, is_internal, profiles ( username, first_name, last_name, business_role )'
 
 /** Inbox shows the N most recently updated threads (not expired — older threads drop off when volume is high). */
 const INBOX_THREAD_LIMIT = 500
@@ -143,7 +155,13 @@ function formatTeamSenderLine(embed: ThreadMessageSenderEmbed | null): string | 
   if (!embed) return null
   const name = [embed.first_name, embed.last_name].filter(Boolean).join(' ').trim() || `@${embed.username}`
   const role =
-    embed.business_role === 'admin' ? 'Admin' : embed.business_role === 'support' ? 'Support' : null
+    embed.business_role === 'admin'
+      ? 'Admin'
+      : embed.business_role === 'support'
+        ? 'Support'
+        : embed.business_role === 'technical'
+          ? 'Technical'
+          : null
   const handle = `@${embed.username}`
   return role ? `${name} · ${handle} · ${role}` : `${name} · ${handle}`
 }
@@ -294,7 +312,11 @@ async function markCustomerMessagesReadForStaff(
   return { errorMessage: null }
 }
 
-function isInboxTab(tab: AppTab): tab is InboxChannelTab {
+function isInboxTab(tab: AppTab): boolean {
+  return tab === 'inbox-website' || tab === 'inbox-app' || tab === 'inbox-technical'
+}
+
+function isChannelInboxTab(tab: AppTab): tab is InboxChannelTab {
   return tab === 'inbox-website' || tab === 'inbox-app'
 }
 
@@ -302,8 +324,11 @@ function inboxChannelPresetKey(tab: InboxChannelTab): string {
   return tab === 'inbox-app' ? INBOX_LABEL_JUWA_APP : INBOX_LABEL_WEBSITE
 }
 
-function inboxChannelTitle(tab: InboxChannelTab): string {
-  return tab === 'inbox-app' ? 'Juwa App Inbox' : 'Website Inbox'
+function inboxChannelTitle(tab: AppTab): string {
+  if (tab === 'inbox-app') return 'Juwa App Inbox'
+  if (tab === 'inbox-technical') return 'Technical Escalations'
+  if (tab === 'inbox-website') return 'Website Inbox'
+  return 'Inbox'
 }
 
 function threadHasChannelLabel(item: ConvoListItem, presetKey: string): boolean {
@@ -341,6 +366,7 @@ const NAV_DEF: {
   { id: 'post', label: 'Post', icon: Megaphone },
   { id: 'inbox-website', label: 'Website', icon: Globe },
   { id: 'inbox-app', label: 'Juwa App', icon: Smartphone },
+  { id: 'inbox-technical', label: 'Technical', icon: Wrench },
   { id: 'users', label: 'Users', icon: Users },
   { id: 'notify', label: 'Notify', icon: Send },
   { id: 'reports', label: 'Reports', icon: ClipboardList },
@@ -407,13 +433,17 @@ export default function DashboardPage() {
     return isInboxTab(activeTabRef.current) && selectedConvoIdRef.current === conversationId
   }
 
-  function resolveInboxTabForConversation(conversationId: string): InboxChannelTab {
+  function resolveInboxTabForConversation(conversationId: string): AppTab {
     const conv = convoListRef.current.find((c) => c.id === conversationId)
+    const role = profileRef.current?.business_role
+    if (role === 'technical' || escalationByConvoIdRef.current[conversationId]) {
+      return 'inbox-technical'
+    }
     const scope = profileRef.current ? effectiveSupportInboxScope(profileRef.current) : 'both'
     let tab: InboxChannelTab = 'inbox-website'
     if (conv && threadHasChannelLabel(conv, INBOX_LABEL_JUWA_APP)) tab = 'inbox-app'
     else if (conv && threadHasChannelLabel(conv, INBOX_LABEL_WEBSITE)) tab = 'inbox-website'
-    if (!scopeAllowsInboxTab(scope, tab)) tab = defaultInboxTabForScope(scope)
+    if (scope && !scopeAllowsInboxTab(scope, tab)) tab = defaultInboxTabForScope(scope)
     return tab
   }
 
@@ -421,6 +451,8 @@ export default function DashboardPage() {
   const [threadLoading, setThreadLoading] = useState(false)
   const [replyDraft, setReplyDraft] = useState('')
   const [replyBusy, setReplyBusy] = useState(false)
+  const replySendingRef = useRef(false)
+  const memberSendSendingRef = useRef(false)
   const [replyPendingImage, setReplyPendingImage] = useState<{ blob: Blob; previewUrl: string } | null>(null)
 
   const [pendingCustomers, setPendingCustomers] = useState<PendingCustomer[]>([])
@@ -542,7 +574,7 @@ export default function DashboardPage() {
       username: string
       first_name: string
       last_name: string
-      business_role: 'admin' | 'support'
+      business_role: 'admin' | 'support' | 'technical'
       support_inbox_scope: SupportInboxScope | null
       deleted_at: string | null
     }[]
@@ -558,6 +590,19 @@ export default function DashboardPage() {
   const [createStaffBusy, setCreateStaffBusy] = useState(false)
   const [removeStaffBusyId, setRemoveStaffBusyId] = useState<string | null>(null)
   const [scopeUpdateBusyId, setScopeUpdateBusyId] = useState<string | null>(null)
+  const [escalationByConvoId, setEscalationByConvoId] = useState<Record<string, EscalationRow>>({})
+  const escalationByConvoIdRef = useRef<Record<string, EscalationRow>>({})
+  escalationByConvoIdRef.current = escalationByConvoId
+  const [escalateBusy, setEscalateBusy] = useState(false)
+  const [escalationActionBusy, setEscalationActionBusy] = useState(false)
+  const [replyIsInternal, setReplyIsInternal] = useState(false)
+  const [newTechFirst, setNewTechFirst] = useState('')
+  const [newTechEmail, setNewTechEmail] = useState('')
+  const [newTechUsername, setNewTechUsername] = useState('')
+  const [newTechPassword, setNewTechPassword] = useState('')
+  const [newTechPasswordConfirm, setNewTechPasswordConfirm] = useState('')
+  const [showNewTechPassword, setShowNewTechPassword] = useState(false)
+  const [createTechBusy, setCreateTechBusy] = useState(false)
 
   const profileRef = useRef<ProfileRow | null>(null)
   profileRef.current = profile
@@ -569,10 +614,16 @@ export default function DashboardPage() {
   }, [])
 
   const navItems = useMemo(() => {
+    if (!profile) return NAV_DEF
+    if (profile.business_role === 'technical') {
+      return NAV_DEF.filter((n) => n.id === 'inbox-technical')
+    }
     const base =
-      profile?.business_role === 'admin' ? NAV_DEF : NAV_DEF.filter((n) => !n.adminOnly)
-    if (!profile) return base
+      profile.business_role === 'admin'
+        ? NAV_DEF
+        : NAV_DEF.filter((n) => !n.adminOnly && n.id !== 'inbox-technical')
     const scope = effectiveSupportInboxScope(profile)
+    if (!scope) return base
     return base.filter((n) => {
       if (n.id === 'inbox-website' || n.id === 'inbox-app') {
         return scopeAllowsInboxTab(scope, n.id)
@@ -600,7 +651,7 @@ export default function DashboardPage() {
           username: string
           first_name: string
           last_name: string
-          business_role: 'admin' | 'support'
+          business_role: 'admin' | 'support' | 'technical'
           support_inbox_scope: SupportInboxScope | null
           deleted_at: string | null
         }[]
@@ -856,6 +907,54 @@ export default function DashboardPage() {
         }
       })
       setConvoList(list)
+
+      {
+        const { data: escRows, error: escErr } = await supabase
+          .from('conversation_escalations')
+          .select('id, conversation_id, reason, status, escalated_by, claimed_by, created_at, claimed_at')
+          .eq('business_id', bid)
+          .in('status', ['pending', 'claimed'])
+        if (escErr) {
+          setLoadError((prev) => (prev ? `${prev} · ` : '') + `conversation_escalations: ${escErr.message}`)
+          setEscalationByConvoId({})
+        } else {
+          const escMap: Record<string, EscalationRow> = {}
+          for (const row of escRows || []) {
+            const r = row as EscalationRow
+            escMap[r.conversation_id] = r
+          }
+          setEscalationByConvoId(escMap)
+
+          const labeledEscalated = list.filter((c) =>
+            (labelsByConvo[c.id] || []).some((l) => l.preset_key === INBOX_LABEL_TECHNICAL_ESCALATION)
+          )
+          const needsSync = labeledEscalated.filter((c) => !escMap[c.id]).map((c) => c.id)
+          if (needsSync.length > 0) {
+            void (async () => {
+              for (const cid of needsSync) {
+                await fetch('/api/staff/sync-technical-escalation', {
+                  method: 'POST',
+                  headers: { 'Content-Type': 'application/json' },
+                  body: JSON.stringify({ conversationId: cid }),
+                })
+              }
+              const { data: escRows2, error: escErr2 } = await supabase
+                .from('conversation_escalations')
+                .select('id, conversation_id, reason, status, escalated_by, claimed_by, created_at, claimed_at')
+                .eq('business_id', bid)
+                .in('status', ['pending', 'claimed'])
+              if (!escErr2 && escRows2) {
+                const nextMap: Record<string, EscalationRow> = {}
+                for (const row of escRows2) {
+                  const r = row as EscalationRow
+                  nextMap[r.conversation_id] = r
+                }
+                setEscalationByConvoId(nextMap)
+              }
+            })()
+          }
+        }
+      }
 
       {
         const { count: bellCount, error: bellErr } = await supabase
@@ -1335,6 +1434,7 @@ export default function DashboardPage() {
       .on('postgres_changes', { event: '*', schema: 'public', table: 'messages' }, queueRefresh)
       .on('postgres_changes', { event: '*', schema: 'public', table: 'profiles' }, queueRefresh)
       .on('postgres_changes', { event: '*', schema: 'public', table: 'conversation_inbox_labels' }, queueRefresh)
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'conversation_escalations', filter: `business_id=eq.${p.business_id}` }, queueRefresh)
       .on('postgres_changes', { event: '*', schema: 'public', table: 'inbox_label_definitions' }, queueRefresh)
       .on('postgres_changes', { event: '*', schema: 'public', table: 'inbox_canned_replies' }, queueRefresh)
       .subscribe()
@@ -1566,8 +1666,14 @@ export default function DashboardPage() {
 
   useEffect(() => {
     if (!profile) return
+    if (profile.business_role === 'technical' && activeTab !== 'inbox-technical') {
+      setActiveTab('inbox-technical')
+      setSelectedConvoId(null)
+      return
+    }
+    if (profile.business_role === 'technical') return
     const scope = effectiveSupportInboxScope(profile)
-    if (isInboxTab(activeTab) && !scopeAllowsInboxTab(scope, activeTab)) {
+    if (scope && isChannelInboxTab(activeTab) && !scopeAllowsInboxTab(scope, activeTab)) {
       setActiveTab(defaultInboxTabForScope(scope))
       setSelectedConvoId(null)
     }
@@ -1582,7 +1688,7 @@ export default function DashboardPage() {
   useEffect(() => {
     if (!profile) return
     if (profile.business_role !== 'admin' && activeTab === 'team') {
-      setActiveTab('home')
+      setActiveTab(profile.business_role === 'technical' ? 'inbox-technical' : 'home')
     }
   }, [profile, activeTab])
 
@@ -1845,6 +1951,131 @@ export default function DashboardPage() {
       alert(
         'Support staff added. They sign in at the same page as you: work email + password. Customers see their name and @username in chat.'
       )
+    }
+  }
+
+  async function createTechnicalStaff() {
+    if (profileRef.current?.business_role !== 'admin') return
+    const firstName = newTechFirst.trim()
+    const staffEmail = newTechEmail.trim().toLowerCase()
+    const staffUsername = newTechUsername.trim().replace(/^@+/, '')
+    const pw = newTechPassword
+    const pw2 = newTechPasswordConfirm
+    if (!firstName || !staffEmail || !staffUsername || !pw || !pw2) {
+      alert('Fill in first name, work email, username, password, and confirm password.')
+      return
+    }
+    if (pw !== pw2) {
+      alert('Password and confirm password must match.')
+      return
+    }
+    if (pw.length < 8) {
+      alert('Password must be at least 8 characters.')
+      return
+    }
+    setCreateTechBusy(true)
+    let createdOk = false
+    let errMsg: string | null = null
+    try {
+      const r = await fetch('/api/staff/create-technical', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          firstName,
+          email: staffEmail,
+          username: staffUsername,
+          password: pw,
+          confirmPassword: pw2,
+        }),
+        signal: AbortSignal.timeout(150_000),
+      })
+      const j = (await r.json().catch(() => ({}))) as { error?: string }
+      if (!r.ok) throw new Error(j.error || `HTTP ${r.status}`)
+      setNewTechFirst('')
+      setNewTechEmail('')
+      setNewTechUsername('')
+      setNewTechPassword('')
+      setNewTechPasswordConfirm('')
+      setShowNewTechPassword(false)
+      void loadTeam()
+      createdOk = true
+    } catch (e) {
+      errMsg = e instanceof Error ? e.message : 'Could not create technical staff.'
+    } finally {
+      setCreateTechBusy(false)
+    }
+    if (errMsg) alert(errMsg)
+    else if (createdOk) {
+      alert(
+        `Technical staff added.\n\nThey sign in at:\n${typeof window !== 'undefined' ? window.location.origin : ''}/login/technical\n\nEmail: ${staffEmail}\nUsername: @${staffUsername}`
+      )
+    }
+  }
+
+  async function escalateSelectedThread() {
+    if (!selectedConvoId) return
+    const reason = window.prompt(
+      'Why are you escalating to Technical Support?\n\nSummarize the issue and what you already tried.',
+      ''
+    )
+    if (!reason?.trim()) return
+    setEscalateBusy(true)
+    try {
+      const r = await fetch('/api/staff/escalate-conversation', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ conversationId: selectedConvoId, reason: reason.trim() }),
+      })
+      const j = (await r.json().catch(() => ({}))) as { error?: string }
+      if (!r.ok) throw new Error(j.error || 'Escalation failed')
+      await refreshDashboard(profileRef.current!)
+      await reloadThreadMessages(selectedConvoId, { markRead: false })
+    } catch (e) {
+      alert(e instanceof Error ? e.message : 'Could not escalate.')
+    } finally {
+      setEscalateBusy(false)
+    }
+  }
+
+  async function claimSelectedEscalation() {
+    if (!selectedConvoId) return
+    setEscalationActionBusy(true)
+    try {
+      const r = await fetch('/api/staff/claim-escalation', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ conversationId: selectedConvoId }),
+      })
+      const j = (await r.json().catch(() => ({}))) as { error?: string }
+      if (!r.ok) throw new Error(j.error || 'Could not claim thread')
+      await refreshDashboard(profileRef.current!)
+    } catch (e) {
+      alert(e instanceof Error ? e.message : 'Could not claim thread.')
+    } finally {
+      setEscalationActionBusy(false)
+    }
+  }
+
+  async function resolveSelectedEscalation() {
+    if (!selectedConvoId) return
+    if (!window.confirm('Mark this escalation resolved? The thread leaves the technical queue.')) return
+    setEscalationActionBusy(true)
+    try {
+      const r = await fetch('/api/staff/resolve-escalation', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ conversationId: selectedConvoId }),
+      })
+      const j = (await r.json().catch(() => ({}))) as { error?: string }
+      if (!r.ok) throw new Error(j.error || 'Could not resolve escalation')
+      await refreshDashboard(profileRef.current!)
+      if (activeTabRef.current === 'inbox-technical') {
+        setSelectedConvoId(null)
+      }
+    } catch (e) {
+      alert(e instanceof Error ? e.message : 'Could not resolve escalation.')
+    } finally {
+      setEscalationActionBusy(false)
     }
   }
 
@@ -2299,13 +2530,19 @@ export default function DashboardPage() {
   async function insertStaffMessageToConversation(
     conversationId: string,
     rawText: string,
-    pendingImage: { blob: Blob; previewUrl: string } | null
+    pendingImage: { blob: Blob; previewUrl: string } | null,
+    options?: { isInternal?: boolean }
   ): Promise<ThreadMessage | null> {
     const p = profileRef.current
     if (!p) return null
     const text = rawText.trim()
     const hasImage = !!pendingImage
+    const isInternal = options?.isInternal ?? false
     if (!text && !hasImage) return null
+    if (isInternal && hasImage) {
+      alert('Internal notes cannot include images.')
+      return null
+    }
 
     let imageUrl: string | null = null
     if (hasImage && pendingImage) {
@@ -2330,6 +2567,7 @@ export default function DashboardPage() {
         sender_id: p.id,
         body,
         image_url: imageUrl,
+        is_internal: isInternal,
       })
       .select(THREAD_MESSAGE_SELECT)
       .single()
@@ -2342,6 +2580,7 @@ export default function DashboardPage() {
 
     await supabase.from('conversations').update({ updated_at: new Date().toISOString() }).eq('id', conversationId)
 
+    if (!isInternal) {
     const row = data as { body: string }
     let preview = (row.body ?? '').trim().slice(0, 160)
     if (!preview) preview = '?? Reply'
@@ -2372,15 +2611,32 @@ export default function DashboardPage() {
       })
       if (nErr) console.error('fallback customer notification insert:', nErr)
     })
+    }
 
     return msg
   }
 
   async function sendReply() {
+    if (replySendingRef.current) return
     if (!profile || !selectedConvoId) return
+    const escalation = escalationByConvoId[selectedConvoId]
+    if (
+      profile.business_role === 'technical' &&
+      (!escalation || escalation.status !== 'claimed' || escalation.claimed_by !== profile.id)
+    ) {
+      alert('Claim this thread before replying to the customer.')
+      return
+    }
     const text = replyDraft.trim()
-    const hasImage = !!replyPendingImage
+    const pendingImage = replyPendingImage
+    const hasImage = !!pendingImage
     if (!text && !hasImage) return
+    const isInternal = replyIsInternal
+
+    replySendingRef.current = true
+    setReplyDraft('')
+    setReplyIsInternal(false)
+    if (pendingImage) clearReplyPendingImage()
 
     const chTyping = staffThreadChannelRef.current
     if (chTyping && staffThreadBroadcastReadyRef.current && staffTypingSentRef.current) {
@@ -2398,17 +2654,20 @@ export default function DashboardPage() {
 
     setReplyBusy(true)
     try {
-      const msg = await insertStaffMessageToConversation(selectedConvoId, replyDraft, replyPendingImage)
+      const msg = await insertStaffMessageToConversation(selectedConvoId, text, pendingImage, {
+        isInternal,
+      })
       if (!msg) return
-      setReplyDraft('')
-      clearReplyPendingImage()
       await refreshDashboard(profileRef.current!)
     } catch (e) {
       console.error(e)
+      if (text) setReplyDraft(text)
+      if (isInternal) setReplyIsInternal(true)
       alert(
         'Could not send. Check you are signed in and RLS allows staff replies. For photos, run migration 002_message_images_storage.sql if needed.'
       )
     } finally {
+      replySendingRef.current = false
       setReplyBusy(false)
     }
   }
@@ -2439,9 +2698,16 @@ export default function DashboardPage() {
   }
 
   async function sendMessageToActiveMember(customerId: string) {
+    if (memberSendSendingRef.current) return
     const draft = (memberMessageDrafts[customerId] ?? '').trim()
     if (!draft) return
 
+    memberSendSendingRef.current = true
+    setMemberMessageDrafts((prev) => {
+      const next = { ...prev }
+      delete next[customerId]
+      return next
+    })
     setMemberSendBusyId(customerId)
     try {
       let conversationId = convoIdByCustomerId.get(customerId)
@@ -2459,17 +2725,14 @@ export default function DashboardPage() {
 
       const msg = await insertStaffMessageToConversation(conversationId, draft, null)
       if (!msg) return
-      setMemberMessageDrafts((prev) => {
-        const next = { ...prev }
-        delete next[customerId]
-        return next
-      })
       setMemberComposeOpenId(null)
       await refreshDashboard(profileRef.current!)
     } catch (e) {
       console.error(e)
+      setMemberMessageDrafts((prev) => ({ ...prev, [customerId]: draft }))
       alert(e instanceof Error ? e.message : 'Could not send message. Check you are signed in and try again.')
     } finally {
+      memberSendSendingRef.current = false
       setMemberSendBusyId(null)
     }
   }
@@ -2940,7 +3203,20 @@ export default function DashboardPage() {
     [convoList]
   )
 
-  const activeInboxChannelPreset = isInboxTab(activeTab) ? inboxChannelPresetKey(activeTab) : null
+  const inboxTechnicalUnreadTotal = useMemo(
+    () =>
+      convoList
+        .filter((c) => threadHasChannelLabel(c, INBOX_LABEL_TECHNICAL_ESCALATION))
+        .reduce((sum, c) => sum + c.unreadCount, 0),
+    [convoList]
+  )
+
+  const activeInboxChannelPreset =
+    activeTab === 'inbox-website'
+      ? INBOX_LABEL_WEBSITE
+      : activeTab === 'inbox-app'
+        ? INBOX_LABEL_JUWA_APP
+        : null
 
   const unreadLabelDef = useMemo<InboxLabelRow>(
     () =>
@@ -3013,14 +3289,22 @@ export default function DashboardPage() {
 
   const channelFilteredConvoList = useMemo(() => {
     let list = filteredConvoList
-    if (activeInboxChannelPreset) {
+    if (activeTab === 'inbox-technical') {
+      list = list.filter((c) => threadHasChannelLabel(c, INBOX_LABEL_TECHNICAL_ESCALATION))
+    } else if (activeInboxChannelPreset) {
       list = list.filter((c) => threadHasChannelLabel(c, activeInboxChannelPreset))
     }
-    if (profile?.business_role === 'support') {
+    if (profile?.business_role === 'support' && staffInboxScope) {
       list = list.filter((c) => conversationMatchesScope(c.labels, staffInboxScope))
     }
     return list
-  }, [filteredConvoList, activeInboxChannelPreset, profile?.business_role, staffInboxScope])
+  }, [
+    filteredConvoList,
+    activeInboxChannelPreset,
+    activeTab,
+    profile?.business_role,
+    staffInboxScope,
+  ])
 
   const inboxDisplayList = useMemo(() => {
     if (inboxThreadLabelFilterIds.length === 0) return channelFilteredConvoList
@@ -3247,8 +3531,13 @@ export default function DashboardPage() {
   const staffRoleLabel =
     profile?.business_role === 'admin'
       ? 'Admin'
-      : `Support · ${supportScopeShortLabel(staffInboxScope)}`
+      : profile?.business_role === 'technical'
+        ? 'Technical Support'
+        : staffInboxScope
+          ? `Support · ${supportScopeShortLabel(staffInboxScope)}`
+          : 'Support'
   const headerSub = `@${profile.username} · ${staffRoleLabel}`
+  const selectedEscalation = selectedConvoId ? escalationByConvoId[selectedConvoId] ?? null : null
 
   return (
     <div className="min-h-screen lg:h-screen lg:overflow-hidden text-[14px] leading-snug text-white antialiased bg-[radial-gradient(ellipse_at_top_left,_#0f1840_0%,_#070a18_45%,_#000000_100%)] lg:grid lg:grid-cols-[220px_1fr]">
@@ -3328,6 +3617,11 @@ export default function DashboardPage() {
                 {item.id === 'inbox-app' && inboxAppUnreadTotal > 0 ? (
                   <span className="shrink-0 min-w-4 h-4 px-1 rounded-full bg-[#f5d040] text-white text-[9px] font-bold flex items-center justify-center tabular-nums">
                     {inboxAppUnreadTotal > 99 ? '99+' : inboxAppUnreadTotal}
+                  </span>
+                ) : null}
+                {item.id === 'inbox-technical' && inboxTechnicalUnreadTotal > 0 ? (
+                  <span className="shrink-0 min-w-4 h-4 px-1 rounded-full bg-[#f97316] text-white text-[9px] font-bold flex items-center justify-center tabular-nums">
+                    {inboxTechnicalUnreadTotal > 99 ? '99+' : inboxTechnicalUnreadTotal}
                   </span>
                 ) : null}
               </button>
@@ -3450,6 +3744,14 @@ export default function DashboardPage() {
                   onClick={() => setActiveTab('inbox-app')}
                 />
               ) : null}
+              {isAdmin ? (
+                <QuickButton
+                  icon={<Wrench className="w-4 h-4" />}
+                  label="Technical"
+                  badgeCount={inboxTechnicalUnreadTotal}
+                  onClick={() => setActiveTab('inbox-technical')}
+                />
+              ) : null}
               <QuickButton icon={<Megaphone className="w-4 h-4" />} label="Post" onClick={() => setActiveTab('post')} />
               {isAdmin ? (
                 <QuickButton icon={<UserCog className="w-4 h-4" />} label="Team" onClick={() => setActiveTab('team')} />
@@ -3466,7 +3768,7 @@ export default function DashboardPage() {
                   <p className="px-3 py-5 text-[13px] text-[#8892b0]">No customer threads yet.</p>
                 ) : (
                   convoList
-                    .filter((c) => isAdmin || conversationMatchesScope(c.labels, staffInboxScope))
+                    .filter((c) => isAdmin || (staffInboxScope != null && conversationMatchesScope(c.labels, staffInboxScope)))
                     .slice(0, 4)
                     .map((item) => (
                     <button
@@ -3862,10 +4164,9 @@ export default function DashboardPage() {
                                                       value={staffReplyThreadDraft}
                                                       onChange={(e) => setStaffReplyThreadDraft(e.target.value)}
                                                       onKeyDown={(e) => {
-                                                        if (e.key === 'Enter' && !e.shiftKey) {
-                                                          e.preventDefault()
-                                                          void submitStaffCommentReply(a.id, c.id)
-                                                        }
+                                                        if (!isChatComposerSubmitKey(e)) return
+                                                        e.preventDefault()
+                                                        void submitStaffCommentReply(a.id, c.id)
                                                       }}
                                                     />
                                                     <button
@@ -3925,10 +4226,9 @@ export default function DashboardPage() {
                                           setStaffCommentDrafts((d) => ({ ...d, [a.id]: e.target.value }))
                                         }
                                         onKeyDown={(e) => {
-                                          if (e.key === 'Enter' && !e.shiftKey) {
-                                            e.preventDefault()
-                                            void submitStaffComment(a.id)
-                                          }
+                                          if (!isChatComposerSubmitKey(e)) return
+                                          e.preventDefault()
+                                          void submitStaffComment(a.id)
                                         }}
                                       />
                                       <button
@@ -3965,18 +4265,32 @@ export default function DashboardPage() {
         {isInboxTab(activeTab) ? (
           <section className="flex flex-col flex-1 min-h-0 space-y-2">
             <DesktopNotificationPrompt variant="staff" />
-            {!isAdmin ? (
+            {!isAdmin && profile.business_role === 'support' && staffInboxScope ? (
               <p className="text-[11px] text-[#8892b0] shrink-0 rounded-xl border border-white/[0.08] bg-white/[0.03] px-3 py-2">
                 Your assignment: <strong className="text-[#c4cbe6]">{supportScopeLabel(staffInboxScope)}</strong>. You only see
                 customer threads in your assigned inbox{staffInboxScope === 'both' ? 'es' : ''}.
               </p>
             ) : null}
+            {profile.business_role === 'technical' ? (
+              <p className="text-[11px] text-[#8892b0] shrink-0 rounded-xl border border-orange-500/20 bg-orange-500/5 px-3 py-2">
+                Escalated threads from support appear here with full chat history. <strong className="text-[#fdba74]">Claim</strong> a thread to take over the same customer chat.
+              </p>
+            ) : null}
             <div className="flex items-center justify-between gap-2 flex-wrap shrink-0">
               <div className="flex items-center gap-2 min-h-[34px]">
                 <h3 className="text-[13px] font-bold text-white">{inboxChannelTitle(activeTab)}</h3>
-                {(activeTab === 'inbox-website' ? inboxWebsiteUnreadTotal : inboxAppUnreadTotal) > 0 ? (
+                {(activeTab === 'inbox-website'
+                  ? inboxWebsiteUnreadTotal
+                  : activeTab === 'inbox-app'
+                    ? inboxAppUnreadTotal
+                    : inboxTechnicalUnreadTotal) > 0 ? (
                   <span className="text-[10px] font-bold text-[#f5d040] bg-[rgba(141,99,255,0.2)] border border-[rgba(141,99,255,0.35)] rounded-md px-1.5 py-px tabular-nums">
-                    {activeTab === 'inbox-website' ? inboxWebsiteUnreadTotal : inboxAppUnreadTotal} new
+                    {activeTab === 'inbox-website'
+                      ? inboxWebsiteUnreadTotal
+                      : activeTab === 'inbox-app'
+                        ? inboxAppUnreadTotal
+                        : inboxTechnicalUnreadTotal}{' '}
+                    new
                   </span>
                 ) : null}
                 <span className="text-[11px] text-[#8892b0] tabular-nums">
@@ -4235,6 +4549,22 @@ export default function DashboardPage() {
                             </div>
                           </div>
                           <div className="flex items-center gap-0.5 shrink-0 relative">
+                            {canEscalateThread(profile.business_role, !!selectedEscalation) ? (
+                              <button
+                                type="button"
+                                disabled={escalateBusy}
+                                onClick={() => void escalateSelectedThread()}
+                                className="inline-flex items-center gap-1 px-2 py-1.5 rounded-lg border border-orange-500/35 bg-orange-500/10 text-[11px] font-semibold text-orange-200 hover:bg-orange-500/20 disabled:opacity-40"
+                                title="Forward to Technical Support"
+                              >
+                                {escalateBusy ? (
+                                  <Loader2 className="w-4 h-4 animate-spin" />
+                                ) : (
+                                  <ArrowUpRight className="w-4 h-4" />
+                                )}
+                                Escalate
+                              </button>
+                            ) : null}
                             <button
                               type="button"
                               onClick={() => {
@@ -4395,6 +4725,38 @@ export default function DashboardPage() {
                           </>
                         ) : null}
                       </div>
+                      {selectedEscalation ? (
+                        <div className="mx-3 rounded-xl border border-orange-500/30 bg-orange-500/10 px-3 py-2 text-[12px] text-orange-100">
+                          <p className="font-semibold text-orange-50">
+                            Technical Escalation ·{' '}
+                            {selectedEscalation.status === 'pending' ? 'Awaiting claim' : 'In progress'}
+                          </p>
+                          <p className="text-orange-200/90 mt-1 whitespace-pre-wrap break-words">{selectedEscalation.reason}</p>
+                          <div className="flex flex-wrap gap-2 mt-2">
+                            {canClaimEscalation(profile.business_role, selectedEscalation) ? (
+                              <button
+                                type="button"
+                                disabled={escalationActionBusy}
+                                onClick={() => void claimSelectedEscalation()}
+                                className="inline-flex items-center gap-1.5 rounded-lg border border-orange-400/40 bg-orange-400/15 px-2.5 py-1.5 text-[12px] font-semibold text-orange-100 hover:bg-orange-400/25 disabled:opacity-40"
+                              >
+                                {escalationActionBusy ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : null}
+                                Claim thread
+                              </button>
+                            ) : null}
+                            {canResolveEscalation(profile.business_role, profile.id, selectedEscalation) ? (
+                              <button
+                                type="button"
+                                disabled={escalationActionBusy}
+                                onClick={() => void resolveSelectedEscalation()}
+                                className="inline-flex items-center gap-1.5 rounded-lg border border-emerald-500/40 bg-emerald-500/10 px-2.5 py-1.5 text-[12px] font-semibold text-emerald-200 hover:bg-emerald-500/20 disabled:opacity-40"
+                              >
+                                Mark resolved
+                              </button>
+                            ) : null}
+                          </div>
+                        </div>
+                      ) : null}
                       {inboxContactOpen ? (
                         <div className="absolute top-[62px] right-3 z-20 w-[280px] rounded-2xl border border-white/10 bg-[#101937] p-4 space-y-3 shadow-[0_20px_40px_-25px_rgba(0,0,0,0.8)]">
                           <p className="text-sm font-semibold text-white">Contact profile</p>
@@ -4429,6 +4791,7 @@ export default function DashboardPage() {
                         ) : (
                           threadMessages.map((m, i) => {
                             const isFromTeam = m.sender_id !== selectedConvo.customer_id
+                            const isInternal = m.is_internal === true
                             const teamLine = isFromTeam
                               ? formatTeamSenderLine(oneEmbed(m.profiles))
                               : null
@@ -4449,12 +4812,17 @@ export default function DashboardPage() {
                                     title={teamLine}
                                   >
                                     {teamLine}
+                                    {isInternal ? <span className="text-amber-300/90"> · Internal</span> : null}
                                   </p>
                                 ) : null}
                                 <div className={`flex w-full min-w-0 ${isFromTeam ? 'justify-end' : 'justify-start'}`}>
                                   <div
                                     className={`w-fit max-w-[min(85%,24rem)] shrink-0 rounded-2xl px-3 py-2 text-sm ${
-                                      isFromTeam ? 'bg-[#6f54ff] text-white' : 'bg-[#151d39] text-[#e2e6f5]'
+                                      isInternal
+                                        ? 'border border-dashed border-amber-500/35 bg-amber-500/10 text-amber-50'
+                                        : isFromTeam
+                                          ? 'bg-[#6f54ff] text-white'
+                                          : 'bg-[#151d39] text-[#e2e6f5]'
                                     }`}
                                   >
                                     {m.image_url ? (
@@ -4491,6 +4859,15 @@ export default function DashboardPage() {
                             {selectedConvo.customerName} is typing...
                           </p>
                         ) : null}
+                        <label className="flex items-center gap-2 text-[11px] text-[#8892b0] cursor-pointer select-none">
+                          <input
+                            type="checkbox"
+                            checked={replyIsInternal}
+                            onChange={(e) => setReplyIsInternal(e.target.checked)}
+                            className="rounded border-white/20 bg-[#111a31] text-[#f97316] focus:ring-[#f97316]/40"
+                          />
+                          Internal note (customer won&apos;t see)
+                        </label>
                         <input
                           ref={replyImageInputRef}
                           type="file"
@@ -4667,14 +5044,14 @@ export default function DashboardPage() {
                           <textarea
                             rows={1}
                             className="flex-1 min-w-0 bg-[#111a31] border border-white/10 rounded-xl px-3 py-2.5 text-sm outline-none focus:border-[#6f54ff] resize-none min-h-[42px] max-h-32"
-                            placeholder="Reply or add a caption..."
+                            placeholder={replyIsInternal ? 'Internal note for staff...' : 'Reply or add a caption...'}
                             value={replyDraft}
                             onChange={(e) => setReplyDraft(e.target.value)}
+                            disabled={replyBusy}
                             onKeyDown={(e) => {
-                              if (e.key === 'Enter' && !e.shiftKey) {
-                                e.preventDefault()
-                                void sendReply()
-                              }
+                              if (!isChatComposerSubmitKey(e)) return
+                              e.preventDefault()
+                              void sendReply()
                             }}
                           />
                           <button
@@ -5002,10 +5379,9 @@ export default function DashboardPage() {
                                     setMemberMessageDrafts((prev) => ({ ...prev, [m.id]: e.target.value }))
                                   }
                                   onKeyDown={(e) => {
-                                    if (e.key === 'Enter' && !e.shiftKey) {
-                                      e.preventDefault()
-                                      void sendMessageToActiveMember(m.id)
-                                    }
+                                    if (!isChatComposerSubmitKey(e)) return
+                                    e.preventDefault()
+                                    void sendMessageToActiveMember(m.id)
                                   }}
                                 />
                                 <button
@@ -5085,9 +5461,12 @@ export default function DashboardPage() {
         {activeTab === 'team' && isAdmin ? (
           <section className="space-y-4 max-w-3xl">
             <p className="text-[12px] text-[#8892b0] leading-relaxed">
-              Admins see every inbox. Support agents can be limited to <strong className="text-[#c4cbe6]">Website</strong>,{' '}
-              <strong className="text-[#c4cbe6]">Juwa App</strong>, or <strong className="text-[#c4cbe6]">both</strong>. Assign
-              scope when creating an account or change it anytime below. Only admins manage team access.
+              Create <strong className="text-[#c4cbe6]">support</strong> accounts for Juwa App / Website inboxes, and{' '}
+              <strong className="text-[#fdba74]">technical</strong> accounts for the escalations queue. Technical staff sign in at{' '}
+              <Link href="/login/technical" className="text-[#fdba74] hover:underline font-medium">
+                /login/technical
+              </Link>{' '}
+              (separate from main staff login).
             </p>
             {isAdmin ? (
               <div className="rounded-2xl border border-white/[0.08] bg-[rgba(11,18,40,0.9)] p-4 space-y-3">
@@ -5193,6 +5572,79 @@ export default function DashboardPage() {
             </div>
             ) : null}
 
+            <div className="rounded-2xl border border-orange-500/20 bg-[rgba(11,18,40,0.9)] p-4 space-y-3">
+              <div className="flex items-center gap-2">
+                <Wrench className="w-4 h-4 text-orange-300 shrink-0" aria-hidden />
+                <h3 className="text-sm font-semibold text-white">Add technical staff</h3>
+              </div>
+              <p className="text-[11px] text-[#8892b0]">
+                Technical agents use a <strong className="text-[#fdba74]">separate login</strong> at{' '}
+                <code className="text-[#fdba74]/90 text-[10px]">/login/technical</code> and only see the{' '}
+                <strong className="text-[#fdba74]">Technical Escalations</strong> inbox with full chat history. Up to 4 technical agents.
+              </p>
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+                <input
+                  className="rounded-xl border border-white/10 bg-[#0c1428] px-3 py-2.5 text-sm outline-none focus:border-[#f97316]/50"
+                  placeholder="First name"
+                  value={newTechFirst}
+                  onChange={(e) => setNewTechFirst(e.target.value)}
+                  autoComplete="given-name"
+                />
+                <input
+                  type="email"
+                  className="rounded-xl border border-white/10 bg-[#0c1428] px-3 py-2.5 text-sm outline-none focus:border-[#f97316]/50"
+                  placeholder="Work email (their login)"
+                  value={newTechEmail}
+                  onChange={(e) => setNewTechEmail(e.target.value)}
+                  autoComplete="off"
+                />
+                <input
+                  className="rounded-xl border border-white/10 bg-[#0c1428] px-3 py-2.5 text-sm outline-none focus:border-[#f97316]/50 sm:col-span-2"
+                  placeholder="Username · public @handle (e.g. tech_alex)"
+                  value={newTechUsername}
+                  onChange={(e) => setNewTechUsername(e.target.value.replace(/\s+/g, '').replace(/^@+/, ''))}
+                  autoComplete="off"
+                />
+                <div className="relative sm:col-span-2">
+                  <input
+                    type={showNewTechPassword ? 'text' : 'password'}
+                    className="w-full rounded-xl border border-white/10 bg-[#0c1428] px-3 py-2.5 pr-10 text-sm outline-none focus:border-[#f97316]/50"
+                    placeholder="Password (min 8 characters)"
+                    value={newTechPassword}
+                    onChange={(e) => setNewTechPassword(e.target.value)}
+                    autoComplete="new-password"
+                  />
+                  <button
+                    type="button"
+                    onClick={() => setShowNewTechPassword((v) => !v)}
+                    className="absolute right-3 top-1/2 -translate-y-1/2 text-[#6f7896] hover:text-white p-0.5"
+                    aria-label={showNewTechPassword ? 'Hide passwords' : 'Show passwords'}
+                  >
+                    {showNewTechPassword ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
+                  </button>
+                </div>
+                <div className="relative sm:col-span-2">
+                  <input
+                    type={showNewTechPassword ? 'text' : 'password'}
+                    className="w-full rounded-xl border border-white/10 bg-[#0c1428] px-3 py-2.5 pr-10 text-sm outline-none focus:border-[#f97316]/50"
+                    placeholder="Confirm password"
+                    value={newTechPasswordConfirm}
+                    onChange={(e) => setNewTechPasswordConfirm(e.target.value)}
+                    autoComplete="new-password"
+                  />
+                </div>
+              </div>
+              <button
+                type="button"
+                disabled={createTechBusy}
+                onClick={() => void createTechnicalStaff()}
+                className="w-full rounded-xl py-2.5 font-semibold bg-gradient-to-r from-[#f97316] to-[#ea580c] disabled:opacity-40 flex items-center justify-center gap-2"
+              >
+                {createTechBusy ? <Loader2 className="w-4 h-4 animate-spin" /> : null}
+                {createTechBusy ? 'Creating...' : 'Create technical account'}
+              </button>
+            </div>
+
             <div className="rounded-2xl border border-white/[0.08] bg-[rgba(11,18,40,0.9)] overflow-hidden">
               <div className="px-3 py-2 border-b border-white/[0.08] flex items-center justify-between gap-2">
                 <h3 className="text-[10px] font-bold uppercase tracking-[0.16em] text-[#8892b0]">Team roster</h3>
@@ -5202,9 +5654,24 @@ export default function DashboardPage() {
                 {teamRows.length === 0 && !teamLoadBusy ? (
                   <p className="px-3 py-5 text-[13px] text-[#8892b0]">No team rows loaded.</p>
                 ) : (
-                  teamRows.map((row) => {
+                  (['admin', 'support', 'technical'] as const).map((roleGroup) => {
+                    const rows = teamRows.filter((r) => r.business_role === roleGroup)
+                    if (rows.length === 0) return null
+                    const sectionTitle =
+                      roleGroup === 'admin'
+                        ? 'Admins'
+                        : roleGroup === 'support'
+                          ? 'Support staff'
+                          : 'Technical staff'
+                    return (
+                      <div key={roleGroup}>
+                        <p className="px-3 py-2 text-[10px] font-bold uppercase tracking-[0.14em] text-[#5c647e] bg-[#0c1428]/60">
+                          {sectionTitle} ({rows.length})
+                        </p>
+                        {rows.map((row) => {
                     const label = `${row.first_name ?? ''} ${row.last_name ?? ''}`.trim() || row.username
                     const isSupport = row.business_role === 'support'
+                    const isTechnical = row.business_role === 'technical'
                     const removed = Boolean(row.deleted_at)
                     const rowScope: SupportInboxScope = isSupport
                       ? row.support_inbox_scope ?? 'both'
@@ -5214,7 +5681,12 @@ export default function DashboardPage() {
                         <div className="min-w-0 flex-1">
                           <p className="font-medium text-white truncate">{label}</p>
                           <p className="text-[12px] text-[#7d86a8] truncate">
-                            @{row.username} · {row.business_role === 'admin' ? 'Admin · All inboxes' : 'Support'}
+                            @{row.username} ·{' '}
+                            {row.business_role === 'admin'
+                              ? 'Admin · All inboxes'
+                              : isTechnical
+                                ? 'Technical · Escalations queue'
+                                : 'Support'}
                             {removed ? <span className="text-red-300/90"> — removed</span> : null}
                           </p>
                           {isSupport && !removed ? (
@@ -5254,6 +5726,20 @@ export default function DashboardPage() {
                           </button>
                           </div>
                         ) : null}
+                        {isAdmin && isTechnical && !removed ? (
+                          <button
+                            type="button"
+                            disabled={removeStaffBusyId === row.id}
+                            onClick={() => void removeSupportMember(row.id, label)}
+                            className="inline-flex items-center gap-1.5 rounded-lg border border-red-500/40 bg-red-500/10 px-2.5 py-1.5 text-[12px] text-red-200 hover:bg-red-500/20 disabled:opacity-40"
+                          >
+                            <Trash2 className="w-3.5 h-3.5 shrink-0" />
+                            {removeStaffBusyId === row.id ? '—' : 'Remove'}
+                          </button>
+                        ) : null}
+                      </div>
+                    )
+                        })}
                       </div>
                     )
                   })
@@ -5549,6 +6035,11 @@ export default function DashboardPage() {
                 {item.id === 'inbox-app' && inboxAppUnreadTotal > 0 ? (
                   <span className="absolute top-1 right-[calc(50%-1.25rem)] min-w-3.5 h-3.5 px-0.5 rounded-full bg-[#ff3b5c] text-white text-[8px] font-bold flex items-center justify-center leading-none tabular-nums border-2 border-[#090e20]">
                     {inboxAppUnreadTotal > 9 ? '9+' : inboxAppUnreadTotal}
+                  </span>
+                ) : null}
+                {item.id === 'inbox-technical' && inboxTechnicalUnreadTotal > 0 ? (
+                  <span className="absolute top-1 right-[calc(50%-1.25rem)] min-w-3.5 h-3.5 px-0.5 rounded-full bg-[#f97316] text-white text-[8px] font-bold flex items-center justify-center leading-none tabular-nums border-2 border-[#090e20]">
+                    {inboxTechnicalUnreadTotal > 9 ? '9+' : inboxTechnicalUnreadTotal}
                   </span>
                 ) : null}
               </span>

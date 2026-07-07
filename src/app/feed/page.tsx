@@ -40,6 +40,7 @@ import { ChatMessageImage } from '@/components/ChatMessageImage'
 import { FeedPostImage } from '@/components/FeedPostImage'
 import { LinkifiedText } from '@/components/LinkifiedText'
 import { ExpandablePostText } from '@/components/ExpandablePostText'
+import { isChatComposerSubmitKey } from '@/lib/chatComposerKeyboard'
 
 type ProfileRow = {
   id: string
@@ -320,6 +321,7 @@ export default function FeedPage() {
   const [messages, setMessages] = useState<MessageRow[]>([])
   const [supportDraft, setSupportDraft] = useState('')
   const [supportLoading, setSupportLoading] = useState(false)
+  const supportSendingRef = useRef(false)
   const [unreadNotifications, setUnreadNotifications] = useState(0)
   /** Unread inbound team messages (drives the Messages FAB — delivered, not opened). */
   const [chatUnreadCount, setChatUnreadCount] = useState(0)
@@ -1351,10 +1353,16 @@ export default function FeedPage() {
   }, [supportOpen, supportPanelView, conversation?.id, messages.length, scrollSupportToLatest])
 
   async function sendSupportMessage() {
+    if (supportSendingRef.current) return
     if (!profile || !conversation) return
     const text = supportDraft.trim()
-    const hasImage = !!pendingAttachment
+    const attachment = pendingAttachment
+    const hasImage = !!attachment
     if (!text && !hasImage) return
+
+    supportSendingRef.current = true
+    setSupportDraft('')
+    if (attachment) clearPendingAttachment()
 
     const chTyping = supportChatChannelRef.current
     if (chTyping && supportChatBroadcastReadyRef.current && customerTypingSentRef.current) {
@@ -1373,13 +1381,13 @@ export default function FeedPage() {
     setSupportLoading(true)
     try {
       let imageUrl: string | null = null
-      if (hasImage && pendingAttachment) {
-        const ext = extFromImageFile(pendingAttachment.file)
+      if (hasImage && attachment) {
+        const ext = extFromImageFile(attachment.file)
         const path = `${profile.id}/${conversation.id}/${crypto.randomUUID()}.${ext}`
         const { error: upErr } = await supabase.storage
           .from('message-images')
-          .upload(path, pendingAttachment.file, {
-            contentType: pendingAttachment.file.type || 'image/jpeg',
+          .upload(path, attachment.file, {
+            contentType: attachment.file.type || 'image/jpeg',
             upsert: false,
           })
         if (upErr) throw upErr
@@ -1404,17 +1412,17 @@ export default function FeedPage() {
 
       if (error) throw error
       setMessages((prev) => [...prev, data as MessageRow])
-      setSupportDraft('')
-      clearPendingAttachment()
       void refreshMessagingUI(profile.id)
     } catch (e) {
       console.error(e)
+      if (text) setSupportDraft(text)
       showToast(
         e instanceof Error && e.message.includes('storage')
           ? 'Could not upload image. Check storage setup (message-images bucket).'
           : 'Could not send message. Try again.'
       )
     } finally {
+      supportSendingRef.current = false
       setSupportLoading(false)
     }
   }
@@ -1784,10 +1792,9 @@ export default function FeedPage() {
                             placeholder={`Reply to ${who}…`}
                             className={`flex-1 min-w-0 rounded-xl border px-3 py-2 text-sm outline-none resize-none min-h-[40px] max-h-28 ${isLight ? 'border-slate-200 bg-white' : 'border-white/10 bg-[#0f1a38]'} ${commentInputText}`}
                             onKeyDown={(e) => {
-                              if (e.key === 'Enter' && !e.shiftKey) {
-                                e.preventDefault()
-                                void submitCommentReply(a.id, c.id)
-                              }
+                              if (!isChatComposerSubmitKey(e)) return
+                              e.preventDefault()
+                              void submitCommentReply(a.id, c.id)
                             }}
                           />
                           <button
@@ -1966,10 +1973,9 @@ export default function FeedPage() {
                           placeholder="Write a comment…"
                           className={`flex-1 min-w-0 bg-transparent text-sm py-2 focus:outline-none resize-none min-h-[40px] max-h-28 ${commentInputText}`}
                           onKeyDown={(e) => {
-                            if (e.key === 'Enter' && !e.shiftKey) {
-                              e.preventDefault()
-                              void submitComment(a.id)
-                            }
+                            if (!isChatComposerSubmitKey(e)) return
+                            e.preventDefault()
+                            void submitComment(a.id)
                           }}
                         />
                         <button
@@ -2324,11 +2330,11 @@ export default function FeedPage() {
                       onChange={(e) => setSupportDraft(e.target.value)}
                       placeholder="Aa"
                       className="flex-1 min-w-0 bg-transparent py-2 text-[15px] focus:outline-none placeholder:text-[#7f8bad] resize-none min-h-[40px] max-h-28 leading-snug"
+                      disabled={supportLoading}
                       onKeyDown={(e) => {
-                        if (e.key === 'Enter' && !e.shiftKey) {
-                          e.preventDefault()
-                          void sendSupportMessage()
-                        }
+                        if (!isChatComposerSubmitKey(e)) return
+                        e.preventDefault()
+                        void sendSupportMessage()
                       }}
                     />
                   </div>

@@ -14,6 +14,9 @@
 --     7) Run  6_auto_approve_customers.sql  (instant customer signup approval)
 --     8) Run  7_unread_inbox_label.sql  (auto Unread label on unread customer messages)
 --     9) Run  8_staff_inbox_scope.sql  (assign support staff to Website / App / Both inboxes)
+--    10) Run  9a_technical_role_enum.sql  (ALONE — adds technical role enum value)
+--    11) Run  9_technical_escalations.sql  (support → technical handoff queue)
+--    12) Run  9b_technical_escalation_label_access.sql  (technical inbox sees labeled threads)
 --
 --   SCENARIO B — Bootstrap already ran; "already exists" / policy errors
 --     Run 3_extras.sql, 5_game_sso.sql, and 6_auto_approve_customers.sql as needed  (safe to re-run)

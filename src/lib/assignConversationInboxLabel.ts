@@ -4,12 +4,14 @@ import type { SupabaseClient } from '@supabase/supabase-js'
 export const INBOX_LABEL_WEBSITE = 'support_website'
 export const INBOX_LABEL_JUWA_APP = 'support_juwa_app'
 export const INBOX_LABEL_UNREAD = 'unread'
+export const INBOX_LABEL_TECHNICAL_ESCALATION = 'technical_escalation'
 
 /** Labels managed automatically by the database (staff cannot toggle manually). */
 export const AUTO_MANAGED_INBOX_LABEL_PRESETS = new Set([
   INBOX_LABEL_WEBSITE,
   INBOX_LABEL_JUWA_APP,
   INBOX_LABEL_UNREAD,
+  INBOX_LABEL_TECHNICAL_ESCALATION,
 ])
 
 export function isAutoManagedInboxLabelPreset(presetKey: string | null | undefined): boolean {
