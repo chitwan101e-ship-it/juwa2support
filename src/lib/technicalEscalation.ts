@@ -25,6 +25,13 @@ export function canEscalateThread(
   return (businessRole === 'admin' || businessRole === 'support') && !hasActiveEscalation
 }
 
+/** True when the thread has a pending or claimed escalation row. */
+export function threadHasActiveTechnicalEscalation(
+  escalation: EscalationRow | null | undefined
+): boolean {
+  return Boolean(escalation && isActiveEscalation(escalation.status))
+}
+
 export function canClaimEscalation(
   businessRole: 'admin' | 'support' | 'technical' | null,
   escalation: EscalationRow | null | undefined

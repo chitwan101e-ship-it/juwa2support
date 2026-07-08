@@ -33,14 +33,24 @@ import {
   Check,
   CheckCheck,
   Share2,
+  CornerDownRight,
 } from 'lucide-react'
 import { ContentModerationMenu } from '@/components/ContentModerationMenu'
 import { sharePostLink } from '@/lib/sharePostLink'
-import { ChatMessageImage } from '@/components/ChatMessageImage'
+import { ChatMessageMedia } from '@/components/ChatMessageMedia'
+import { QuotedMessageBlock } from '@/components/QuotedMessageBlock'
 import { FeedPostImage } from '@/components/FeedPostImage'
 import { LinkifiedText } from '@/components/LinkifiedText'
 import { ExpandablePostText } from '@/components/ExpandablePostText'
 import { isChatComposerSubmitKey } from '@/lib/chatComposerKeyboard'
+import { mergeChatMessages } from '@/lib/mergeChatMessages'
+import {
+  formatReplyPreviewText,
+  isImageOnlyBody,
+  oneEmbed as oneReplyEmbed,
+  replySenderLabel,
+  type ReplyEmbedMessage,
+} from '@/lib/chatReply'
 
 type ProfileRow = {
   id: string
@@ -111,6 +121,8 @@ type MessageRow = {
   image_url?: string | null
   read?: boolean | null
   read_at?: string | null
+  reply_to_message_id?: string | null
+  reply_to?: ReplyEmbedMessage | ReplyEmbedMessage[] | null
   profiles?: MessageSenderEmbed | MessageSenderEmbed[] | null
 }
 
@@ -147,6 +159,8 @@ function initials(name: string) {
 
 const MESSAGE_PROFILE_SELECT =
   'username, first_name, last_name, role, business_role, avatar_url'
+
+const MESSAGE_SELECT_FIELDS = `id, conversation_id, sender_id, body, created_at, image_url, read, read_at, reply_to_message_id, profiles ( ${MESSAGE_PROFILE_SELECT} ), reply_to:messages!reply_to_message_id ( id, body, sender_id, image_url, profiles ( ${MESSAGE_PROFILE_SELECT} ) )`
 
 function teamAvatarUrl(
   embed: MessageSenderEmbed | null,
@@ -320,6 +334,9 @@ export default function FeedPage() {
   conversationRef.current = conversation
   const [messages, setMessages] = useState<MessageRow[]>([])
   const [supportDraft, setSupportDraft] = useState('')
+  const [replyToMessage, setReplyToMessage] = useState<MessageRow | null>(null)
+  const messagesReloadSeqRef = useRef(0)
+  const messagesReloadDebounceRef = useRef<number | null>(null)
   const [supportLoading, setSupportLoading] = useState(false)
   const supportSendingRef = useRef(false)
   const [unreadNotifications, setUnreadNotifications] = useState(0)
@@ -864,7 +881,8 @@ export default function FeedPage() {
 
   const loadConversationMessages = useCallback(
     async (conversationId: string, options?: { markRead?: boolean }) => {
-      const sel = `id, conversation_id, sender_id, body, created_at, image_url, read, read_at, profiles ( ${MESSAGE_PROFILE_SELECT} )`
+      const seq = ++messagesReloadSeqRef.current
+      const sel = MESSAGE_SELECT_FIELDS
       const shouldMarkRead = options?.markRead ?? isActivelyViewingCustomerChat(conversationId)
 
       const { data: msgs, error: mErr } = await supabase
@@ -874,7 +892,10 @@ export default function FeedPage() {
         .order('created_at', { ascending: true })
 
       if (mErr) throw mErr
-      setMessages((msgs || []) as MessageRow[])
+      if (seq !== messagesReloadSeqRef.current) return
+      if (conversationRef.current?.id !== conversationId) return
+
+      setMessages((prev) => mergeChatMessages(prev, (msgs || []) as MessageRow[]))
 
       if (shouldMarkRead) {
         const { errorMessage: markErr } = await markStaffMessagesReadForCustomer(supabase, conversationId)
@@ -885,7 +906,8 @@ export default function FeedPage() {
           .select(sel)
           .eq('conversation_id', conversationId)
           .order('created_at', { ascending: true })
-        if (msgs2) setMessages(msgs2 as MessageRow[])
+        if (seq !== messagesReloadSeqRef.current) return
+        if (msgs2) setMessages((prev) => mergeChatMessages(prev, msgs2 as MessageRow[]))
       }
 
       const uid = profile?.id
@@ -990,6 +1012,8 @@ export default function FeedPage() {
     setSupportBizId(businessId)
     setSupportPanelView('chat')
     setSupportLoading(true)
+    setMessages([])
+    setReplyToMessage(null)
     try {
       const { data: existing, error: exErr } = await supabase
         .from('conversations')
@@ -1116,7 +1140,11 @@ export default function FeedPage() {
             if (uid) void refreshMessagingUI(uid)
             return
           }
-          void loadConversationMessages(cid, { markRead: true })
+          if (messagesReloadDebounceRef.current) window.clearTimeout(messagesReloadDebounceRef.current)
+          messagesReloadDebounceRef.current = window.setTimeout(() => {
+            messagesReloadDebounceRef.current = null
+            void loadConversationMessages(cid, { markRead: true })
+          }, 280)
         }
       )
       .on(
@@ -1346,10 +1374,12 @@ export default function FeedPage() {
     const text = supportDraft.trim()
     const attachment = pendingAttachment
     const hasImage = !!attachment
+    const replyTarget = replyToMessage
     if (!text && !hasImage) return
 
     supportSendingRef.current = true
     setSupportDraft('')
+    setReplyToMessage(null)
     if (attachment) clearPendingAttachment()
 
     const chTyping = supportChatChannelRef.current
@@ -1385,7 +1415,7 @@ export default function FeedPage() {
 
       const body = text || (imageUrl ? '📷' : ' ')
 
-      const sel = `id, conversation_id, sender_id, body, created_at, image_url, read, read_at, profiles ( ${MESSAGE_PROFILE_SELECT} )`
+      const sel = MESSAGE_SELECT_FIELDS
 
       const { data, error } = await supabase
         .from('messages')
@@ -1394,6 +1424,7 @@ export default function FeedPage() {
           sender_id: profile.id,
           body,
           image_url: imageUrl,
+          reply_to_message_id: replyTarget?.id ?? null,
         })
         .select(sel)
         .single()
@@ -1404,6 +1435,7 @@ export default function FeedPage() {
     } catch (e) {
       console.error(e)
       if (text) setSupportDraft(text)
+      if (replyTarget) setReplyToMessage(replyTarget)
       showToast(
         e instanceof Error && e.message.includes('storage')
           ? 'Could not upload image. Check storage setup (message-images bucket).'
@@ -2168,14 +2200,17 @@ export default function FeedPage() {
                       isTeam && embed
                         ? `${[embed.first_name, embed.last_name].filter(Boolean).join(' ').trim() || `@${embed.username}`} · @${embed.username}`
                         : null
-                    const showText = Boolean(m.body?.trim()) && m.body !== '📷'
+                    const replyEmbed = oneReplyEmbed(m.reply_to)
+                    const showText = Boolean(m.body?.trim()) && !isImageOnlyBody(m.body)
+                    const hasImage = Boolean(m.image_url)
+                    const imageOnly = hasImage && !showText && !replyEmbed
                     const isLastMine = mine && i === feedSeenIndexes.lastMine
                     const isLastOther = !mine && i === feedSeenIndexes.lastOther
                     return (
                       <div
                         key={m.id}
                         className={clsx(
-                          'flex w-full max-w-full shrink-0',
+                          'group flex w-full max-w-full shrink-0',
                           mine ? 'justify-end' : 'justify-start gap-2'
                         )}
                       >
@@ -2203,26 +2238,59 @@ export default function FeedPage() {
                             {teamLine}
                           </p>
                         ) : null}
+                        <div className={clsx('flex items-end gap-1', mine ? 'flex-row-reverse' : 'flex-row')}>
+                          <button
+                            type="button"
+                            onClick={() => setReplyToMessage(m)}
+                            className={clsx(
+                              'shrink-0 p-1.5 rounded-full opacity-0 group-hover:opacity-100 transition-opacity',
+                              isLight ? 'text-violet-600 hover:bg-violet-100' : 'text-[#9ba6cb] hover:bg-white/10'
+                            )}
+                            aria-label="Reply to message"
+                            title="Reply"
+                          >
+                            <CornerDownRight className="w-4 h-4" />
+                          </button>
+                        {imageOnly ? (
+                          <ChatMessageMedia
+                            imageUrl={m.image_url!}
+                            tone={mine ? 'sent' : 'customer'}
+                          />
+                        ) : (
                         <div
                           className={clsx(
                             'text-sm shadow-lg overflow-hidden max-w-full ring-1 ring-white/10',
-                            mine
-                              ? 'rounded-2xl rounded-br-md'
-                              : 'rounded-2xl rounded-bl-md bg-[#13213d] text-white border border-[#f5d040]/20'
+                            hasImage && !showText && !replyEmbed
+                              ? 'rounded-[18px] p-0'
+                              : mine
+                                ? 'rounded-2xl rounded-br-md'
+                                : 'rounded-2xl rounded-bl-md bg-[#13213d] text-white border border-[#f5d040]/20'
                           )}
-                          style={mine ? { background: chatGradient, color: 'white' } : undefined}
+                          style={mine && !(hasImage && showText) ? { background: chatGradient, color: 'white' } : undefined}
                         >
-                          {m.image_url ? (
-                            <ChatMessageImage
-                              imageUrl={m.image_url}
-                              alt="Attachment"
+                          {replyEmbed ? (
+                            <QuotedMessageBlock
+                              reply={replyEmbed}
+                              isFromTeam={mine}
+                              customerId={profile.id}
                               className={clsx(
-                                'max-w-full max-h-52 w-full object-cover block',
-                                showText ? 'rounded-t-2xl' : 'rounded-2xl'
+                                'mx-2 mt-2 rounded-lg border-l-2 px-2 py-1.5 text-[11px]',
+                                mine
+                                  ? 'border-white/50 bg-black/15 text-white/90'
+                                  : 'border-[#f5d040]/40 bg-black/20 text-[#d8deef]'
                               )}
                             />
                           ) : null}
-                          {showText ? (
+                          {hasImage ? (
+                            <ChatMessageMedia
+                              imageUrl={m.image_url!}
+                              caption={showText ? m.body : null}
+                              showCaption={showText}
+                              tone={mine ? 'sent' : 'customer'}
+                              className={replyEmbed ? 'mt-1' : undefined}
+                            />
+                          ) : null}
+                          {!hasImage && showText ? (
                             <LinkifiedText
                               text={m.body}
                               className={clsx(
@@ -2232,6 +2300,8 @@ export default function FeedPage() {
                               linkClassName={mine ? 'text-white' : 'text-[#b8c8ff]'}
                             />
                           ) : null}
+                        </div>
+                        )}
                         </div>
                         <div
                           className={clsx(
@@ -2281,6 +2351,30 @@ export default function FeedPage() {
               />
 
               <div className="shrink-0 border-t border-white/10 bg-[#0f1a38] p-2 space-y-2">
+                {replyToMessage ? (
+                  <div className="flex items-start gap-2 rounded-xl border border-[#6f54ff]/30 bg-[#6f54ff]/10 px-2.5 py-2">
+                    <CornerDownRight className="w-4 h-4 shrink-0 text-[#c4b5fd] mt-0.5" aria-hidden />
+                    <div className="min-w-0 flex-1">
+                      <p className="text-[11px] font-semibold text-[#d4cbff]">
+                        Replying to{' '}
+                        {replySenderLabel(one(replyToMessage.profiles), {
+                          isMine: replyToMessage.sender_id === profile.id,
+                        })}
+                      </p>
+                      <p className="text-[12px] text-[#e2e6f5] truncate">
+                        {formatReplyPreviewText(replyToMessage.body, Boolean(replyToMessage.image_url))}
+                      </p>
+                    </div>
+                    <button
+                      type="button"
+                      onClick={() => setReplyToMessage(null)}
+                      className="shrink-0 p-1 rounded-md text-[#9ea8cc] hover:text-white hover:bg-white/10"
+                      aria-label="Cancel reply"
+                    >
+                      <X className="w-4 h-4" />
+                    </button>
+                  </div>
+                ) : null}
                 {pendingAttachment ? (
                   <div className="relative rounded-lg overflow-hidden border border-white/10 max-h-28">
                     {/* eslint-disable-next-line @next/next/no-img-element */}

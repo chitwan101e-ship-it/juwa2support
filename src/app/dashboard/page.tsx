@@ -10,6 +10,7 @@ import { downscaleImageFileToJpeg } from '@/lib/downscaleImageFile'
 import { JUWA2_BRAND } from '@/lib/juwa2Theme'
 import { ChatBubbleIcon } from '@/components/ChatBubbleIcon'
 import {
+  CornerDownRight,
   ArrowLeft,
   ArrowUpRight,
   Bell,
@@ -49,7 +50,8 @@ import {
 } from 'lucide-react'
 import { sharePostLink } from '@/lib/sharePostLink'
 import { ContentModerationMenu } from '@/components/ContentModerationMenu'
-import { ChatMessageImage } from '@/components/ChatMessageImage'
+import { ChatMessageMedia } from '@/components/ChatMessageMedia'
+import { QuotedMessageBlock } from '@/components/QuotedMessageBlock'
 import { FeedPostImage } from '@/components/FeedPostImage'
 import { LinkifiedText } from '@/components/LinkifiedText'
 import { DesktopNotificationPrompt } from '@/components/DesktopNotificationPrompt'
@@ -66,8 +68,12 @@ import {
   canClaimEscalation,
   canEscalateThread,
   canResolveEscalation,
+  isActiveEscalation,
+  threadHasActiveTechnicalEscalation,
   type EscalationRow,
 } from '@/lib/technicalEscalation'
+import { mergeChatMessages } from '@/lib/mergeChatMessages'
+import { formatReplyPreviewText, isImageOnlyBody, oneEmbed as oneReplyEmbed, type ReplyEmbedMessage } from '@/lib/chatReply'
 import {
   conversationMatchesScope,
   defaultInboxTabForScope,
@@ -115,6 +121,7 @@ type ConvoListItem = {
   customerName: string
   customerUsername: string
   customerAvatar?: string | null
+  staffGameUsername?: string | null
   preview: string
   updated_at: string
   unreadCount: number
@@ -137,11 +144,13 @@ type ThreadMessage = {
   read?: boolean | null
   read_at?: string | null
   is_internal?: boolean
+  reply_to_message_id?: string | null
+  reply_to?: ReplyEmbedMessage | ReplyEmbedMessage[] | null
   profiles?: ThreadMessageSenderEmbed | ThreadMessageSenderEmbed[] | null
 }
 
 const THREAD_MESSAGE_SELECT =
-  'id, sender_id, body, created_at, image_url, read, read_at, is_internal, profiles ( username, first_name, last_name, business_role )'
+  'id, sender_id, body, created_at, image_url, read, read_at, is_internal, reply_to_message_id, profiles ( username, first_name, last_name, business_role ), reply_to:messages!reply_to_message_id ( id, body, sender_id, image_url, profiles ( username, first_name, last_name, business_role ) )'
 
 /** Inbox shows the N most recently updated threads (not expired — older threads drop off when volume is high). */
 const INBOX_THREAD_LIMIT = 500
@@ -608,6 +617,13 @@ export default function DashboardPage() {
   const escalationByConvoIdRef = useRef<Record<string, EscalationRow>>({})
   escalationByConvoIdRef.current = escalationByConvoId
   const [escalateBusy, setEscalateBusy] = useState(false)
+  const [escalateModalOpen, setEscalateModalOpen] = useState(false)
+  const [escalateReasonDraft, setEscalateReasonDraft] = useState('')
+  const [replyToMessage, setReplyToMessage] = useState<ThreadMessage | null>(null)
+  const [staffGameUsernameDraft, setStaffGameUsernameDraft] = useState('')
+  const [staffGameUsernameBusy, setStaffGameUsernameBusy] = useState(false)
+  const threadReloadSeqRef = useRef(0)
+  const threadReloadDebounceRef = useRef<number | null>(null)
   const [escalationActionBusy, setEscalationActionBusy] = useState(false)
   const [replyIsInternal, setReplyIsInternal] = useState(false)
   const [newTechFirst, setNewTechFirst] = useState('')
@@ -722,7 +738,7 @@ export default function DashboardPage() {
       const [convRes, pendingRes, reportRes, convCustRes, followRes, cannedRes] = await Promise.all([
         supabase
           .from('conversations')
-          .select('id, customer_id, updated_at')
+          .select('id, customer_id, updated_at, staff_game_username')
           .eq('business_id', bid)
           .order('updated_at', { ascending: false })
           .limit(INBOX_THREAD_LIMIT),
@@ -902,7 +918,7 @@ export default function DashboardPage() {
         }
       }
 
-      const list: ConvoListItem[] = convoRows.map((row: { id: string; customer_id: string; updated_at: string }) => {
+      const list: ConvoListItem[] = convoRows.map((row: { id: string; customer_id: string; updated_at: string; staff_game_username?: string | null }) => {
         const pr = profileById[row.customer_id]
         const name = pr
           ? `${pr.first_name ?? ''} ${pr.last_name ?? ''}`.trim() || pr.username
@@ -914,6 +930,7 @@ export default function DashboardPage() {
           customerName: name,
           customerUsername: pr?.username ?? '—',
           customerAvatar: pr?.avatar_url ?? null,
+          staffGameUsername: row.staff_game_username?.trim() || null,
           preview: pv?.body || 'No messages yet',
           updated_at: row.updated_at,
           unreadCount: unreadByConvo[row.id] || 0,
@@ -1471,7 +1488,11 @@ export default function DashboardPage() {
         'postgres_changes',
         { event: 'INSERT', schema: 'public', table: 'messages', filter: `conversation_id=eq.${cid}` },
         () => {
-          void reloadThreadMessages(cid, { markRead: isActivelyViewingInboxThread(cid) })
+          if (threadReloadDebounceRef.current) window.clearTimeout(threadReloadDebounceRef.current)
+          threadReloadDebounceRef.current = window.setTimeout(() => {
+            threadReloadDebounceRef.current = null
+            void reloadThreadMessages(cid, { markRead: isActivelyViewingInboxThread(cid) })
+          }, 280)
         }
       )
       .on(
@@ -2026,20 +2047,28 @@ export default function DashboardPage() {
 
   async function escalateSelectedThread() {
     if (!selectedConvoId) return
-    const reason = window.prompt(
-      'Why are you escalating to Technical Support?\n\nSummarize the issue and what you already tried.',
-      ''
-    )
-    if (!reason?.trim()) return
+    setEscalateReasonDraft('')
+    setEscalateModalOpen(true)
+  }
+
+  async function submitEscalation() {
+    if (!selectedConvoId) return
+    const reason = escalateReasonDraft.trim()
+    if (!reason) {
+      alert('Please describe why you are escalating this thread.')
+      return
+    }
     setEscalateBusy(true)
     try {
       const r = await fetch('/api/staff/escalate-conversation', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ conversationId: selectedConvoId, reason: reason.trim() }),
+        body: JSON.stringify({ conversationId: selectedConvoId, reason }),
       })
       const j = (await r.json().catch(() => ({}))) as { error?: string }
       if (!r.ok) throw new Error(j.error || 'Escalation failed')
+      setEscalateModalOpen(false)
+      setEscalateReasonDraft('')
       await refreshDashboard(profileRef.current!)
       await reloadThreadMessages(selectedConvoId, { markRead: false })
     } catch (e) {
@@ -2451,10 +2480,33 @@ export default function DashboardPage() {
     }
   }
 
+  async function saveStaffGameUsername() {
+    if (!selectedConvoId || !profile) return
+    const trimmed = staffGameUsernameDraft.trim()
+    setStaffGameUsernameBusy(true)
+    try {
+      const { error } = await supabase
+        .from('conversations')
+        .update({ staff_game_username: trimmed || null })
+        .eq('id', selectedConvoId)
+      if (error) throw error
+      setConvoList((prev) =>
+        prev.map((c) =>
+          c.id === selectedConvoId ? { ...c, staffGameUsername: trimmed || null } : c
+        )
+      )
+    } catch (e) {
+      alert(e instanceof Error ? e.message : 'Could not save game username.')
+    } finally {
+      setStaffGameUsernameBusy(false)
+    }
+  }
+
   async function reloadThreadMessages(
     conversationId: string,
     options?: { markRead?: boolean; showLoading?: boolean }
   ) {
+    const seq = ++threadReloadSeqRef.current
     const showLoading = options?.showLoading ?? false
     if (showLoading) setThreadLoading(true)
     try {
@@ -2464,6 +2516,7 @@ export default function DashboardPage() {
         .eq('id', conversationId)
         .maybeSingle()
       if (convoErr) throw convoErr
+      if (seq !== threadReloadSeqRef.current) return
       const customerId = convoMeta?.customer_id as string | undefined
 
       const { data, error } = await supabase
@@ -2472,26 +2525,33 @@ export default function DashboardPage() {
         .eq('conversation_id', conversationId)
         .order('created_at', { ascending: true })
       if (error) throw error
-      setThreadMessages((data || []) as ThreadMessage[])
+      if (seq !== threadReloadSeqRef.current) return
+      if (selectedConvoIdRef.current !== conversationId) return
+
+      setThreadMessages((prev) => mergeChatMessages(prev, (data || []) as ThreadMessage[]))
 
       if (options?.markRead && customerId) {
         await markActiveThreadRead(conversationId, customerId)
       }
     } catch (e) {
       console.error(e)
-      setThreadMessages([])
     } finally {
-      if (showLoading) setThreadLoading(false)
+      if (seq === threadReloadSeqRef.current && showLoading) setThreadLoading(false)
     }
   }
 
   async function openThread(conversationId: string) {
     setInboxLabelsPopoverOpen(false)
     setCannedPopoverOpen(false)
+    setInboxContactOpen(false)
+    setReplyToMessage(null)
     setSelectedConvoId(conversationId)
+    setThreadMessages([])
     setThreadLoading(true)
     setReplyDraft('')
     clearReplyPendingImage()
+    const conv = convoListRef.current.find((c) => c.id === conversationId)
+    setStaffGameUsernameDraft(conv?.staffGameUsername ?? '')
     await reloadThreadMessages(conversationId, { markRead: true, showLoading: true })
   }
 
@@ -2543,7 +2603,7 @@ export default function DashboardPage() {
     conversationId: string,
     rawText: string,
     pendingImage: { blob: Blob; previewUrl: string } | null,
-    options?: { isInternal?: boolean }
+    options?: { isInternal?: boolean; replyToMessageId?: string | null }
   ): Promise<ThreadMessage | null> {
     const p = profileRef.current
     if (!p) return null
@@ -2580,6 +2640,7 @@ export default function DashboardPage() {
         body,
         image_url: imageUrl,
         is_internal: isInternal,
+        reply_to_message_id: options?.replyToMessageId ?? null,
       })
       .select(THREAD_MESSAGE_SELECT)
       .single()
@@ -2644,10 +2705,12 @@ export default function DashboardPage() {
     const hasImage = !!pendingImage
     if (!text && !hasImage) return
     const isInternal = replyIsInternal
+    const replyTarget = replyToMessage
 
     replySendingRef.current = true
     setReplyDraft('')
     setReplyIsInternal(false)
+    setReplyToMessage(null)
     if (pendingImage) clearReplyPendingImage()
 
     const chTyping = staffThreadChannelRef.current
@@ -2668,6 +2731,7 @@ export default function DashboardPage() {
     try {
       const msg = await insertStaffMessageToConversation(selectedConvoId, text, pendingImage, {
         isInternal,
+        replyToMessageId: isInternal ? null : replyTarget?.id ?? null,
       })
       if (!msg) return
       await refreshDashboard(profileRef.current!)
@@ -2675,6 +2739,7 @@ export default function DashboardPage() {
       console.error(e)
       if (text) setReplyDraft(text)
       if (isInternal) setReplyIsInternal(true)
+      if (replyTarget) setReplyToMessage(replyTarget)
       alert(
         'Could not send. Check you are signed in and RLS allows staff replies. For photos, run migration 002_message_images_storage.sql if needed.'
       )
@@ -3560,6 +3625,9 @@ export default function DashboardPage() {
           ? `Support · ${supportScopeShortLabel(staffInboxScope)}`
           : 'Support'
   const selectedEscalation = selectedConvoId ? escalationByConvoId[selectedConvoId] ?? null : null
+  const threadIsTechnicallyEscalated = threadHasActiveTechnicalEscalation(selectedEscalation)
+  const showActiveEscalationBanner =
+    selectedEscalation && isActiveEscalation(selectedEscalation.status)
 
   return (
     <div className={`admin-shell min-h-screen lg:h-screen lg:overflow-hidden text-[14px] leading-snug text-white antialiased bg-[radial-gradient(ellipse_at_top_left,_#0f1840_0%,_#070a18_45%,_#000000_100%)] lg:grid ${sidebarCollapsed ? 'lg:grid-cols-[68px_1fr]' : 'lg:grid-cols-[236px_1fr]'}`}>
@@ -4603,12 +4671,20 @@ export default function DashboardPage() {
                               )}
                             </div>
                             <div className="min-w-0">
-                              <p className="text-[13px] font-semibold text-white truncate">{selectedConvo.customerName}</p>
+                              <p className="text-[13px] font-semibold text-white truncate">
+                                {selectedConvo.customerName}
+                                {selectedConvo.staffGameUsername ? (
+                                  <span className="font-normal text-[#c4b5fd]">
+                                    {' '}
+                                    · {selectedConvo.staffGameUsername}
+                                  </span>
+                                ) : null}
+                              </p>
                               <p className="text-[11px] text-[#8892b0] truncate">@{selectedConvo.customerUsername} · Customer</p>
                             </div>
                           </div>
                           <div className="flex items-center gap-0.5 shrink-0 relative">
-                            {canEscalateThread(profile.business_role, !!selectedEscalation) ? (
+                            {canEscalateThread(profile.business_role, threadIsTechnicallyEscalated) ? (
                               <button
                                 type="button"
                                 disabled={escalateBusy}
@@ -4784,7 +4860,7 @@ export default function DashboardPage() {
                           </>
                         ) : null}
                       </div>
-                      {selectedEscalation ? (
+                      {showActiveEscalationBanner && selectedEscalation ? (
                         <div className="mx-3 rounded-xl border border-orange-500/30 bg-orange-500/10 px-3 py-2 text-[12px] text-orange-100">
                           <p className="font-semibold text-orange-50">
                             Technical Escalation ·{' '}
@@ -4828,9 +4904,45 @@ export default function DashboardPage() {
                               )}
                             </div>
                             <div className="min-w-0">
-                              <p className="font-semibold text-white truncate">{selectedConvo.customerName}</p>
+                              <p className="font-semibold text-white truncate">
+                                {selectedConvo.customerName}
+                                {selectedConvo.staffGameUsername ? (
+                                  <span className="font-normal text-[#c4b5fd]">
+                                    {' '}
+                                    · {selectedConvo.staffGameUsername}
+                                  </span>
+                                ) : null}
+                              </p>
                               <p className="text-xs text-[#7d86a8] truncate">@{selectedConvo.customerUsername}</p>
                             </div>
+                          </div>
+                          <div className="space-y-2">
+                            <label className="block text-[11px] font-medium text-[#9ea8cc]">
+                              Game username <span className="text-[#5c647e]">(staff only)</span>
+                            </label>
+                            <div className="flex gap-1.5">
+                              <input
+                                className="flex-1 min-w-0 bg-[#111a31] border border-white/10 rounded-lg px-2.5 py-2 text-[13px] outline-none focus:border-[#6f54ff]/50"
+                                placeholder="e.g. LuckyPlayer99"
+                                value={staffGameUsernameDraft}
+                                onChange={(e) => setStaffGameUsernameDraft(e.target.value)}
+                                onKeyDown={(e) => {
+                                  if (e.key === 'Enter') {
+                                    e.preventDefault()
+                                    void saveStaffGameUsername()
+                                  }
+                                }}
+                              />
+                              <button
+                                type="button"
+                                disabled={staffGameUsernameBusy}
+                                onClick={() => void saveStaffGameUsername()}
+                                className="shrink-0 rounded-lg px-3 py-2 text-[12px] font-semibold bg-[#6f54ff]/20 text-[#d4cbff] hover:bg-[#6f54ff]/30 disabled:opacity-40"
+                              >
+                                {staffGameUsernameBusy ? <Loader2 className="w-4 h-4 animate-spin" /> : 'Save'}
+                              </button>
+                            </div>
+                            <p className="text-[10px] text-[#5c647e]">Shown next to their name in chat for quick reference.</p>
                           </div>
                           <div className="pt-2 border-t border-white/10 text-xs text-[#7d86a8] space-y-1">
                             <p>Conversation ID</p>
@@ -4854,7 +4966,10 @@ export default function DashboardPage() {
                             const teamLine = isFromTeam
                               ? formatTeamSenderLine(oneEmbed(m.profiles))
                               : null
-                            const showText = Boolean(m.body?.trim()) && m.body !== '??'
+                            const replyEmbed = oneReplyEmbed(m.reply_to)
+                            const showText = Boolean(m.body?.trim()) && !isImageOnlyBody(m.body)
+                            const hasImage = Boolean(m.image_url)
+                            const imageOnly = hasImage && !showText && !replyEmbed
                             const showSeen =
                               m.read === true &&
                               m.read_at &&
@@ -4863,7 +4978,7 @@ export default function DashboardPage() {
                             return (
                               <div
                                 key={m.id}
-                                className={`flex flex-col w-full min-w-0 ${isFromTeam ? 'items-end' : 'items-start'}`}
+                                className={`group flex flex-col w-full min-w-0 ${isFromTeam ? 'items-end' : 'items-start'}`}
                               >
                                 {teamLine ? (
                                   <p
@@ -4874,34 +4989,106 @@ export default function DashboardPage() {
                                     {isInternal ? <span className="text-amber-300/90"> · Internal</span> : null}
                                   </p>
                                 ) : null}
-                                <div className={`flex w-full min-w-0 ${isFromTeam ? 'justify-end' : 'justify-start'}`}>
+                                <div
+                                  className={`flex w-full min-w-0 items-end gap-1 ${
+                                    isFromTeam ? 'justify-end' : 'justify-start'
+                                  }`}
+                                >
+                                  {!isFromTeam && !isInternal ? (
+                                    <button
+                                      type="button"
+                                      onClick={() => {
+                                        setReplyToMessage(m)
+                                        setReplyIsInternal(false)
+                                      }}
+                                      className="shrink-0 p-1.5 rounded-lg text-[#7d86a8] opacity-0 group-hover:opacity-100 hover:text-white hover:bg-white/10 transition-opacity"
+                                      aria-label="Reply to message"
+                                      title="Reply"
+                                    >
+                                      <CornerDownRight className="w-4 h-4" />
+                                    </button>
+                                  ) : null}
                                   <div
-                                    className={`w-fit max-w-[min(85%,24rem)] shrink-0 rounded-2xl px-3 py-2 text-sm ${
-                                      isInternal
-                                        ? 'border border-dashed border-amber-500/35 bg-amber-500/10 text-amber-50'
-                                        : isFromTeam
-                                          ? 'bg-[#6f54ff] text-white'
-                                          : 'bg-[#151d39] text-[#e2e6f5]'
-                                    }`}
+                                    className={`flex flex-col min-w-0 ${isFromTeam ? 'items-end' : 'items-start'}`}
                                   >
-                                    {m.image_url ? (
-                                      <ChatMessageImage
-                                        imageUrl={m.image_url}
-                                        alt="Attachment"
-                                        className="rounded-lg max-h-40 mb-1 max-w-full w-full object-cover"
+                                  <div
+                                    className={
+                                      imageOnly
+                                        ? 'w-fit max-w-[min(85%,280px)] shrink-0'
+                                        : `w-fit max-w-[min(85%,24rem)] shrink-0 rounded-2xl text-sm ${
+                                            isInternal
+                                              ? 'border border-dashed border-amber-500/35 bg-amber-500/10 text-amber-50 px-3 py-2'
+                                              : isFromTeam
+                                                ? 'bg-[#6f54ff] text-white px-3 py-2'
+                                                : 'bg-[#151d39] text-[#e2e6f5] px-3 py-2'
+                                          }`
+                                    }
+                                  >
+                                    {replyEmbed && !imageOnly ? (
+                                      <QuotedMessageBlock
+                                        reply={replyEmbed}
+                                        isFromTeam={isFromTeam}
+                                        customerId={selectedConvo.customer_id}
                                       />
                                     ) : null}
-                                    {showText ? (
+                                    {hasImage ? (
+                                      imageOnly ? (
+                                        <ChatMessageMedia
+                                          imageUrl={m.image_url!}
+                                          tone={isInternal ? 'internal' : isFromTeam ? 'team' : 'customer'}
+                                        />
+                                      ) : (
+                                        <ChatMessageMedia
+                                          imageUrl={m.image_url!}
+                                          caption={showText ? m.body : null}
+                                          showCaption={showText}
+                                          tone={isInternal ? 'internal' : isFromTeam ? 'team' : 'customer'}
+                                          className="mb-1"
+                                        />
+                                      )
+                                    ) : null}
+                                    {!hasImage && replyEmbed ? (
+                                      <QuotedMessageBlock
+                                        reply={replyEmbed}
+                                        isFromTeam={isFromTeam}
+                                        customerId={selectedConvo.customer_id}
+                                      />
+                                    ) : null}
+                                    {!hasImage && showText ? (
                                       <LinkifiedText
                                         text={m.body}
                                         className="whitespace-pre-wrap break-words"
                                         linkClassName={isFromTeam ? 'text-white' : 'text-[#9eb4ff]'}
                                       />
                                     ) : null}
-                                    <p className={`text-[10px] mt-1 ${isFromTeam ? 'text-white/70' : 'text-[#7d86a8]'}`}>
+                                    {!imageOnly ? (
+                                      <p
+                                        className={`text-[10px] mt-1 ${isFromTeam ? 'text-white/70' : 'text-[#7d86a8]'}`}
+                                      >
+                                        {timeAgo(m.created_at)}
+                                      </p>
+                                    ) : null}
+                                  </div>
+                                  {imageOnly ? (
+                                    <p className="text-[10px] mt-1 px-0.5 text-[#7d86a8]">
                                       {timeAgo(m.created_at)}
                                     </p>
+                                  ) : null}
                                   </div>
+                                  {isFromTeam && !isInternal ? (
+                                    <button
+                                      type="button"
+                                      onClick={() => {
+                                        setReplyToMessage(m)
+                                        setReplyIsInternal(false)
+                                      }}
+                                      className="shrink-0 p-1.5 rounded-lg text-[#7d86a8] opacity-0 group-hover:opacity-100 hover:text-white hover:bg-white/10 transition-opacity"
+                                      aria-label="Reply to message"
+                                      title="Reply"
+                                    >
+                                      <CornerDownRight className="w-4 h-4" />
+                                    </button>
+                                  ) : null}
                                 </div>
                                 {showSeen ? (
                                   <p className="text-[11px] text-[#7d86a8] mt-1 px-1">Seen · {timeAgo(m.read_at!)}</p>
@@ -4922,11 +5109,33 @@ export default function DashboardPage() {
                           <input
                             type="checkbox"
                             checked={replyIsInternal}
-                            onChange={(e) => setReplyIsInternal(e.target.checked)}
+                            onChange={(e) => {
+                              setReplyIsInternal(e.target.checked)
+                              if (e.target.checked) setReplyToMessage(null)
+                            }}
                             className="rounded border-white/20 bg-[#111a31] text-[#f97316] focus:ring-[#f97316]/40"
                           />
                           Internal note (customer won&apos;t see)
                         </label>
+                        {replyToMessage && !replyIsInternal ? (
+                          <div className="flex items-start gap-2 rounded-xl border border-[#6f54ff]/30 bg-[#6f54ff]/10 px-2.5 py-2">
+                            <CornerDownRight className="w-4 h-4 shrink-0 text-[#c4b5fd] mt-0.5" aria-hidden />
+                            <div className="min-w-0 flex-1">
+                              <p className="text-[11px] font-semibold text-[#d4cbff]">Replying to</p>
+                              <p className="text-[12px] text-[#e2e6f5] truncate">
+                                {formatReplyPreviewText(replyToMessage.body, Boolean(replyToMessage.image_url))}
+                              </p>
+                            </div>
+                            <button
+                              type="button"
+                              onClick={() => setReplyToMessage(null)}
+                              className="shrink-0 p-1 rounded-md text-[#9ea8cc] hover:text-white hover:bg-white/10"
+                              aria-label="Cancel reply"
+                            >
+                              <X className="w-4 h-4" />
+                            </button>
+                          </div>
+                        ) : null}
                         <input
                           ref={replyImageInputRef}
                           type="file"
@@ -6115,6 +6324,69 @@ export default function DashboardPage() {
           )
         })}
       </nav>
+
+      {escalateModalOpen ? (
+        <div
+          className="fixed inset-0 z-[90] flex items-center justify-center bg-black/70 p-4"
+          role="dialog"
+          aria-modal="true"
+          aria-labelledby="escalate-modal-title"
+          onClick={() => {
+            if (!escalateBusy) setEscalateModalOpen(false)
+          }}
+        >
+          <div
+            className="w-full max-w-md rounded-2xl border border-white/10 bg-[#101937] p-4 shadow-2xl space-y-3"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <div className="flex items-start justify-between gap-2">
+              <div>
+                <h2 id="escalate-modal-title" className="text-base font-semibold text-white">
+                  Escalate to Technical Support
+                </h2>
+                <p className="text-[12px] text-[#8892b0] mt-1">
+                  Summarize the issue and what you already tried. Technical staff will see the full chat history.
+                </p>
+              </div>
+              <button
+                type="button"
+                disabled={escalateBusy}
+                onClick={() => setEscalateModalOpen(false)}
+                className="p-1.5 rounded-lg text-[#9ea8cc] hover:text-white hover:bg-white/10 disabled:opacity-40"
+                aria-label="Close"
+              >
+                <X className="w-4 h-4" />
+              </button>
+            </div>
+            <textarea
+              className="w-full min-h-[120px] resize-y bg-[#111a31] border border-white/10 rounded-xl px-3 py-2.5 text-[14px] text-white outline-none focus:border-orange-500/50"
+              placeholder="e.g. Customer cannot load coins after purchase. Tried clearing cache and re-linking account."
+              value={escalateReasonDraft}
+              onChange={(e) => setEscalateReasonDraft(e.target.value)}
+              autoFocus
+            />
+            <div className="flex justify-end gap-2">
+              <button
+                type="button"
+                disabled={escalateBusy}
+                onClick={() => setEscalateModalOpen(false)}
+                className="rounded-xl px-4 py-2 text-[13px] font-semibold text-[#aeb7d6] hover:bg-white/10 disabled:opacity-40"
+              >
+                Cancel
+              </button>
+              <button
+                type="button"
+                disabled={escalateBusy || !escalateReasonDraft.trim()}
+                onClick={() => void submitEscalation()}
+                className="inline-flex items-center gap-1.5 rounded-xl px-4 py-2 text-[13px] font-semibold bg-orange-500/20 text-orange-100 border border-orange-500/35 hover:bg-orange-500/30 disabled:opacity-40"
+              >
+                {escalateBusy ? <Loader2 className="w-4 h-4 animate-spin" /> : <ArrowUpRight className="w-4 h-4" />}
+                Escalate
+              </button>
+            </div>
+          </div>
+        </div>
+      ) : null}
     </div>
   )
 }
