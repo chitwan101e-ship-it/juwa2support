@@ -3,7 +3,6 @@ import type { SupabaseClient } from '@supabase/supabase-js'
 export const CONVO_LIST_PAGE_SIZE = 1000
 export const INBOX_PREVIEW_CHUNK = 500
 export const INBOX_QUERY_CHUNK = 200
-export const INBOX_LIST_DEFAULT_MAX = 300
 
 export type BusinessConversationRow = {
   id: string
@@ -96,4 +95,94 @@ async function fetchInboxUnreadCountsLegacy(
     }
   }
   return unreadByConvo
+}
+
+export type InboxLabelAssignmentDef = {
+  id: string
+  name: string
+  color: string | null
+  is_system: boolean
+  preset_key?: string | null
+}
+
+/** Chunked load of conversation_inbox_labels (avoids huge .in() failures). */
+export async function fetchConversationInboxLabels(
+  client: SupabaseClient,
+  convIds: string[],
+  defById: Record<string, InboxLabelAssignmentDef>
+): Promise<Record<string, InboxLabelAssignmentDef[]>> {
+  const labelsByConvo: Record<string, InboxLabelAssignmentDef[]> = {}
+  if (convIds.length === 0) return labelsByConvo
+
+  for (let i = 0; i < convIds.length; i += INBOX_QUERY_CHUNK) {
+    const slice = convIds.slice(i, i + INBOX_QUERY_CHUNK)
+    const { data: assignRows, error: assignErr } = await client
+      .from('conversation_inbox_labels')
+      .select('conversation_id, label_id')
+      .in('conversation_id', slice)
+    if (assignErr) throw assignErr
+
+    for (const row of assignRows || []) {
+      const r = row as { conversation_id: string; label_id: string }
+      const d = defById[r.label_id]
+      if (!d) continue
+      if (!labelsByConvo[r.conversation_id]) labelsByConvo[r.conversation_id] = []
+      labelsByConvo[r.conversation_id].push(d)
+    }
+  }
+
+  for (const cid of Object.keys(labelsByConvo)) {
+    labelsByConvo[cid].sort((a, b) => {
+      if (a.is_system !== b.is_system) return a.is_system ? -1 : 1
+      return a.name.localeCompare(b.name)
+    })
+  }
+
+  return labelsByConvo
+}
+
+/** Chunked latest message previews per conversation. */
+export async function fetchInboxLatestPreviews(
+  client: SupabaseClient,
+  convIds: string[]
+): Promise<Record<string, { body: string; created_at: string }>> {
+  const previewByConvo: Record<string, { body: string; created_at: string }> = {}
+  if (convIds.length === 0) return previewByConvo
+
+  let usedRpc = true
+  for (let i = 0; i < convIds.length; i += INBOX_PREVIEW_CHUNK) {
+    const slice = convIds.slice(i, i + INBOX_PREVIEW_CHUNK)
+    const { data: previews, error: previewErr } = await client.rpc('inbox_latest_previews', {
+      p_conversation_ids: slice,
+    })
+    if (previewErr) {
+      usedRpc = false
+      break
+    }
+    for (const row of previews || []) {
+      const r = row as { conversation_id: string; body: string; created_at: string }
+      previewByConvo[r.conversation_id] = { body: r.body, created_at: r.created_at }
+    }
+  }
+
+  if (usedRpc) return previewByConvo
+
+  for (let i = 0; i < convIds.length; i += INBOX_QUERY_CHUNK) {
+    const slice = convIds.slice(i, i + INBOX_QUERY_CHUNK)
+    const { data: msgs, error: me } = await client
+      .from('messages')
+      .select('conversation_id, body, created_at')
+      .in('conversation_id', slice)
+      .order('created_at', { ascending: false })
+    if (me) throw me
+    for (const m of msgs || []) {
+      const row = m as { conversation_id: string; body: string; created_at: string }
+      const prev = previewByConvo[row.conversation_id]
+      if (!prev || new Date(row.created_at) > new Date(prev.created_at)) {
+        previewByConvo[row.conversation_id] = { body: row.body, created_at: row.created_at }
+      }
+    }
+  }
+
+  return previewByConvo
 }

@@ -62,7 +62,6 @@ import {
   INBOX_LABEL_UNREAD,
   INBOX_LABEL_WEBSITE,
   isAutoManagedInboxLabelPreset,
-  syncUnreadInboxLabelForConversation,
 } from '@/lib/assignConversationInboxLabel'
 import {
   canClaimEscalation,
@@ -88,8 +87,9 @@ import {
 import { isChatComposerSubmitKey } from '@/lib/chatComposerKeyboard'
 import {
   fetchAllBusinessConversations,
+  fetchConversationInboxLabels,
+  fetchInboxLatestPreviews,
   fetchInboxUnreadCounts,
-  INBOX_LIST_DEFAULT_MAX,
 } from '@/lib/staffInbox'
 import { listBusinessMemberProfiles } from '@/lib/resolveCustomerRecipient'
 import { StaffMultiTabPanel, StaffTabPanel, StaffUsersSubPanel } from '@/components/StaffTabPanel'
@@ -133,6 +133,8 @@ type ConvoListItem = {
   updated_at: string
   unreadCount: number
   labels: InboxLabelRow[]
+  /** When DB channel labels are missing, infer Website vs Juwa App from customer profile. */
+  inferredChannel: 'website' | 'app'
 }
 
 type ThreadMessageSenderEmbed = {
@@ -196,8 +198,6 @@ function writeDashCache(businessId: string, data: Omit<DashSessionCache, 'at'>) 
   }
 }
 
-/** Inbox shows the N most recently updated threads (not expired — older threads drop off when volume is high). */
-const INBOX_THREAD_LIMIT = INBOX_LIST_DEFAULT_MAX
 /** PostgREST `.in()` filters are sent on the URL; chunk to stay under proxy length limits. */
 const PROFILE_ID_IN_CHUNK = 200
 
@@ -390,6 +390,29 @@ function threadHasChannelLabel(item: ConvoListItem, presetKey: string): boolean 
   return item.labels.some((l) => l.preset_key === presetKey)
 }
 
+function threadMatchesInboxTab(
+  item: ConvoListItem,
+  tab: AppTab,
+  escalationById: Record<string, EscalationRow>
+): boolean {
+  if (tab === 'inbox-technical') {
+    if (threadHasChannelLabel(item, INBOX_LABEL_TECHNICAL_ESCALATION)) return true
+    const esc = escalationById[item.id]
+    return Boolean(esc && isActiveEscalation(esc.status))
+  }
+  if (tab === 'inbox-app') {
+    if (threadHasChannelLabel(item, INBOX_LABEL_JUWA_APP)) return true
+    if (threadHasChannelLabel(item, INBOX_LABEL_WEBSITE)) return false
+    return (item.inferredChannel ?? 'website') === 'app'
+  }
+  if (tab === 'inbox-website') {
+    if (threadHasChannelLabel(item, INBOX_LABEL_WEBSITE)) return true
+    if (threadHasChannelLabel(item, INBOX_LABEL_JUWA_APP)) return false
+    return (item.inferredChannel ?? 'website') !== 'app'
+  }
+  return true
+}
+
 function sortInboxLabels(labels: InboxLabelRow[]): InboxLabelRow[] {
   return [...labels].sort((a, b) => {
     if (a.is_system !== b.is_system) return a.is_system ? -1 : 1
@@ -440,11 +463,12 @@ function timeAgo(iso: string) {
 }
 
 function inboxLabelChipStyle(color: string | null): CSSProperties {
-  const c = color && /^#[0-9A-Fa-f]{6}$/.test(color) ? color : '#64748b'
+  const c = color && /^#[0-9A-Fa-f]{6}$/.test(color) ? color : '#475569'
   return {
-    borderColor: `${c}99`,
+    borderColor: `${c}bb`,
     color: c,
-    backgroundColor: `${c}18`,
+    backgroundColor: `${c}1a`,
+    fontWeight: 600,
   }
 }
 
@@ -842,7 +866,7 @@ export default function DashboardPage() {
 
         const [convoRows, pendingRes, reportRes, cannedRes] = await Promise.all([
           wantInbox
-            ? fetchAllBusinessConversations(supabase, bid, { maxRows: INBOX_LIST_DEFAULT_MAX })
+            ? fetchAllBusinessConversations(supabase, bid)
             : Promise.resolve([]),
           pendingFetch,
           wantReports
@@ -914,14 +938,21 @@ export default function DashboardPage() {
 
           const profileById: Record<
             string,
-            { first_name: string; last_name: string; username: string; avatar_url?: string | null }
+            {
+              first_name: string
+              last_name: string
+              username: string
+              avatar_url?: string | null
+              signup_source?: string | null
+              game_user_id?: string | null
+            }
           > = {}
           if (customerIds.length > 0) {
             for (let i = 0; i < customerIds.length; i += PROFILE_ID_IN_CHUNK) {
               const slice = customerIds.slice(i, i + PROFILE_ID_IN_CHUNK)
               const { data: profs, error: pe } = await supabase
                 .from('profiles')
-                .select('id, first_name, last_name, username, avatar_url')
+                .select('id, first_name, last_name, username, avatar_url, signup_source, game_user_id')
                 .in('id', slice)
               if (pe) {
                 setLoadError((prev) => (prev ? `${prev} · ` : '') + `profiles: ${pe.message}`)
@@ -934,46 +965,21 @@ export default function DashboardPage() {
                   last_name: string
                   username: string
                   avatar_url?: string | null
+                  signup_source?: string | null
+                  game_user_id?: string | null
                 }
                 profileById[r.id] = r
               }
             }
           }
 
-          const previewByConvo: Record<string, { body: string; created_at: string }> = {}
+          let previewByConvo: Record<string, { body: string; created_at: string }> = {}
           if (convIds.length > 0) {
-            const { data: previews, error: previewErr } = await supabase.rpc('inbox_latest_previews', {
-              p_conversation_ids: convIds,
-            })
-            if (previewErr) {
-              const msg = previewErr.message || ''
-              const missingRpc =
-                previewErr.code === 'PGRST202' ||
-                previewErr.code === '42883' ||
-                /does not exist|schema cache|Could not find the function/i.test(msg)
-              if (missingRpc) {
-                const { data: msgs, error: me } = await supabase
-                  .from('messages')
-                  .select('conversation_id, body, created_at')
-                  .in('conversation_id', convIds)
-                  .order('created_at', { ascending: false })
-                  .limit(10000)
-                if (me) setLoadError((prev) => (prev ? `${prev} · ` : '') + `messages: ${me.message}`)
-                for (const m of msgs || []) {
-                  const row = m as { conversation_id: string; body: string; created_at: string }
-                  const prev = previewByConvo[row.conversation_id]
-                  if (!prev || new Date(row.created_at) > new Date(prev.created_at)) {
-                    previewByConvo[row.conversation_id] = { body: row.body, created_at: row.created_at }
-                  }
-                }
-              } else {
-                setLoadError((prev) => (prev ? `${prev} · ` : '') + `inbox_latest_previews: ${msg}`)
-              }
-            } else {
-              for (const row of previews || []) {
-                const r = row as { conversation_id: string; body: string; created_at: string }
-                previewByConvo[r.conversation_id] = { body: r.body, created_at: r.created_at }
-              }
+            try {
+              previewByConvo = await fetchInboxLatestPreviews(supabase, convIds)
+            } catch (previewLoadErr) {
+              const msg = previewLoadErr instanceof Error ? previewLoadErr.message : 'preview load failed'
+              setLoadError((prev) => (prev ? `${prev} · ` : '') + `inbox previews: ${msg}`)
             }
           }
 
@@ -996,28 +1002,13 @@ export default function DashboardPage() {
           }))
           setInboxLabelCatalog(labelCatalog)
           const defById = Object.fromEntries(labelCatalog.map((d) => [d.id, d])) as Record<string, InboxLabelRow>
-          const labelsByConvo: Record<string, InboxLabelRow[]> = {}
+          let labelsByConvo: Record<string, InboxLabelRow[]> = {}
           if (convIds.length > 0 && !defErr) {
-            const { data: assignRows, error: assignErr } = await supabase
-              .from('conversation_inbox_labels')
-              .select('conversation_id, label_id')
-              .in('conversation_id', convIds)
-            if (assignErr)
-              setLoadError((prev) => (prev ? `${prev} · ` : '') + `conversation_inbox_labels: ${assignErr.message}`)
-            else {
-              for (const row of assignRows || []) {
-                const r = row as { conversation_id: string; label_id: string }
-                const d = defById[r.label_id]
-                if (!d) continue
-                if (!labelsByConvo[r.conversation_id]) labelsByConvo[r.conversation_id] = []
-                labelsByConvo[r.conversation_id].push(d)
-              }
-              for (const cid of Object.keys(labelsByConvo)) {
-                labelsByConvo[cid].sort((a, b) => {
-                  if (a.is_system !== b.is_system) return a.is_system ? -1 : 1
-                  return a.name.localeCompare(b.name)
-                })
-              }
+            try {
+              labelsByConvo = await fetchConversationInboxLabels(supabase, convIds, defById)
+            } catch (labelLoadErr) {
+              const msg = labelLoadErr instanceof Error ? labelLoadErr.message : 'label load failed'
+              setLoadError((prev) => (prev ? `${prev} · ` : '') + `conversation_inbox_labels: ${msg}`)
             }
           }
 
@@ -1027,6 +1018,8 @@ export default function DashboardPage() {
               ? `${pr.first_name ?? ''} ${pr.last_name ?? ''}`.trim() || pr.username
               : 'Customer'
             const pv = previewByConvo[row.id]
+            const inferredChannel: 'website' | 'app' =
+              pr?.signup_source === 'juwa_app' || pr?.game_user_id ? 'app' : 'website'
             return {
               id: row.id,
               customer_id: row.customer_id,
@@ -1038,6 +1031,7 @@ export default function DashboardPage() {
               updated_at: row.updated_at,
               unreadCount: unreadByConvo[row.id] || 0,
               labels: labelsByConvo[row.id] || [],
+              inferredChannel,
             }
           })
           setConvoList(list)
@@ -1531,7 +1525,13 @@ export default function DashboardPage() {
 
         const cached = pRow.business_id ? readDashCache(pRow.business_id) : null
         if (cached) {
-          setConvoList(cached.convoList)
+          setConvoList(
+            cached.convoList.map((c) => ({
+              ...c,
+              inferredChannel: c.inferredChannel ?? 'website',
+              labels: c.labels ?? [],
+            }))
+          )
           setActiveMembers(cached.activeMembers)
           setSuspendedMembers(cached.suspendedMembers)
           setPendingCustomers(cached.pendingCustomers ?? [])
@@ -1727,7 +1727,7 @@ export default function DashboardPage() {
         if (convoListRef.current.some((c) => c.id === convo.id)) return
         const { data: prof } = await supabase
           .from('profiles')
-          .select('first_name, last_name, username, avatar_url')
+          .select('first_name, last_name, username, avatar_url, signup_source, game_user_id')
           .eq('id', convo.customer_id)
           .maybeSingle()
         const pr = prof as {
@@ -1735,12 +1735,16 @@ export default function DashboardPage() {
           last_name?: string | null
           username?: string | null
           avatar_url?: string | null
+          signup_source?: string | null
+          game_user_id?: string | null
         } | null
         const name = pr
           ? `${pr.first_name ?? ''} ${pr.last_name ?? ''}`.trim() || (pr.username ?? 'Customer')
           : 'Customer'
         const body = (payload.new as { body?: string }).body ?? ''
         const createdAt = (payload.new as { created_at?: string }).created_at ?? convo.updated_at
+        const inferredChannel: 'website' | 'app' =
+          pr?.signup_source === 'juwa_app' || pr?.game_user_id ? 'app' : 'website'
         const item: ConvoListItem = {
           id: convo.id as string,
           customer_id: convo.customer_id as string,
@@ -1752,8 +1756,9 @@ export default function DashboardPage() {
           updated_at: createdAt as string,
           unreadCount: 1,
           labels: [],
+          inferredChannel,
         }
-        setConvoList((prev) => [item, ...prev].slice(0, INBOX_LIST_DEFAULT_MAX))
+        setConvoList((prev) => [item, ...prev])
       })()
     }
 
@@ -2124,7 +2129,7 @@ export default function DashboardPage() {
     return () => window.clearTimeout(timer)
   }, [usersPanelTab, activeMemberQuery])
 
-  /** Load older threads for inbox search that fall outside the recent-thread limit. */
+  /** Load threads for inbox search that are not yet in the loaded list (e.g. member match without a cached row). */
   useEffect(() => {
     if (!isInboxTab(activeTab)) {
       setInboxSearchExtraConvos([])
@@ -2187,7 +2192,7 @@ export default function DashboardPage() {
 
             const { data: prof } = await supabase
               .from('profiles')
-              .select('id, first_name, last_name, username, avatar_url')
+              .select('id, first_name, last_name, username, avatar_url, signup_source, game_user_id')
               .eq('id', customerId)
               .maybeSingle()
 
@@ -2204,11 +2209,15 @@ export default function DashboardPage() {
               last_name?: string | null
               username?: string | null
               avatar_url?: string | null
+              signup_source?: string | null
+              game_user_id?: string | null
             } | null
             const name = pr
               ? `${pr.first_name ?? ''} ${pr.last_name ?? ''}`.trim() || (pr.username ?? 'Customer')
               : 'Customer'
             const msg = lastMsg as { body?: string; created_at?: string } | null
+            const inferredChannel: 'website' | 'app' =
+              pr?.signup_source === 'juwa_app' || pr?.game_user_id ? 'app' : 'website'
 
             extras.push({
               id: convo.id as string,
@@ -2220,6 +2229,7 @@ export default function DashboardPage() {
               updated_at: (convo.updated_at as string) || msg?.created_at || new Date().toISOString(),
               unreadCount: 0,
               labels: [],
+              inferredChannel,
             })
             loadedConvoIds.add(convo.id as string)
           }
@@ -2794,9 +2804,6 @@ export default function DashboardPage() {
           : c
       )
     )
-    if (p?.business_id) {
-      void syncUnreadInboxLabelForConversation(supabase, p.business_id, conversationId, false)
-    }
     if (p?.id) {
       const { errorMessage: nErr } = await markConversationNotificationsRead(supabase, p.id, conversationId)
       if (nErr) console.error(nErr)
@@ -3614,33 +3621,26 @@ export default function DashboardPage() {
   const inboxWebsiteUnreadTotal = useMemo(
     () =>
       convoList
-        .filter((c) => threadHasChannelLabel(c, INBOX_LABEL_WEBSITE))
+        .filter((c) => threadMatchesInboxTab(c, 'inbox-website', escalationByConvoId))
         .reduce((sum, c) => sum + c.unreadCount, 0),
-    [convoList]
+    [convoList, escalationByConvoId]
   )
 
   const inboxAppUnreadTotal = useMemo(
     () =>
       convoList
-        .filter((c) => threadHasChannelLabel(c, INBOX_LABEL_JUWA_APP))
+        .filter((c) => threadMatchesInboxTab(c, 'inbox-app', escalationByConvoId))
         .reduce((sum, c) => sum + c.unreadCount, 0),
-    [convoList]
+    [convoList, escalationByConvoId]
   )
 
   const inboxTechnicalUnreadTotal = useMemo(
     () =>
       convoList
-        .filter((c) => threadHasChannelLabel(c, INBOX_LABEL_TECHNICAL_ESCALATION))
+        .filter((c) => threadMatchesInboxTab(c, 'inbox-technical', escalationByConvoId))
         .reduce((sum, c) => sum + c.unreadCount, 0),
-    [convoList]
+    [convoList, escalationByConvoId]
   )
-
-  const activeInboxChannelPreset =
-    activeTab === 'inbox-website'
-      ? INBOX_LABEL_WEBSITE
-      : activeTab === 'inbox-app'
-        ? INBOX_LABEL_JUWA_APP
-        : null
 
   const unreadLabelDef = useMemo<InboxLabelRow>(
     () =>
@@ -3670,8 +3670,6 @@ export default function DashboardPage() {
     }
     return [...byId.values()].sort((a, b) => b.updated_at.localeCompare(a.updated_at))
   }, [convoList, inboxSearchExtraConvos, needsInboxLists])
-
-  const inboxShowsRecentCap = convoList.length >= INBOX_THREAD_LIMIT
 
   /** Merge active-member profile data when inbox thread rows lack names (RLS gaps). */
   const convoListForInbox = useMemo(() => {
@@ -3717,10 +3715,8 @@ export default function DashboardPage() {
   const channelFilteredConvoList = useMemo(() => {
     if (!needsInboxLists) return []
     let list = filteredConvoList
-    if (activeTab === 'inbox-technical') {
-      list = list.filter((c) => threadHasChannelLabel(c, INBOX_LABEL_TECHNICAL_ESCALATION))
-    } else if (activeInboxChannelPreset) {
-      list = list.filter((c) => threadHasChannelLabel(c, activeInboxChannelPreset))
+    if (isInboxTab(activeTab)) {
+      list = list.filter((c) => threadMatchesInboxTab(c, activeTab, escalationByConvoId))
     }
     if (profile?.business_role === 'support' && staffInboxScope) {
       list = list.filter((c) => conversationMatchesScope(c.labels, staffInboxScope))
@@ -3728,8 +3724,8 @@ export default function DashboardPage() {
     return list
   }, [
     filteredConvoList,
-    activeInboxChannelPreset,
     activeTab,
+    escalationByConvoId,
     profile?.business_role,
     staffInboxScope,
     needsInboxLists,
@@ -3757,25 +3753,6 @@ export default function DashboardPage() {
     if (!isInboxTab(activeTab)) return
     setInboxThreadLabelFilterIds([])
   }, [activeTab])
-
-  /** Persist Unread label in DB when it diverges from unread message counts. */
-  useEffect(() => {
-    const bid = profile?.business_id
-    if (!bid || convoList.length === 0) return
-    if (!inboxLabelCatalog.some((l) => l.preset_key === INBOX_LABEL_UNREAD)) return
-
-    const mismatched = convoList.filter((c) => {
-      const hasLabel = c.labels.some((l) => l.preset_key === INBOX_LABEL_UNREAD)
-      return (c.unreadCount > 0 && !hasLabel) || (c.unreadCount === 0 && hasLabel)
-    })
-    if (mismatched.length === 0) return
-
-    void (async () => {
-      for (const c of mismatched) {
-        await syncUnreadInboxLabelForConversation(supabase, bid, c.id, c.unreadCount > 0)
-      }
-    })()
-  }, [convoList, profile?.business_id, inboxLabelCatalog, supabase])
 
   /** Active members matching inbox search who have no thread in results (often: follow only, no messages yet). */
   const inboxSearchMemberMatches = useMemo(() => {
@@ -3973,8 +3950,8 @@ export default function DashboardPage() {
 
   return (
     <div className={`admin-shell min-h-screen lg:h-screen lg:overflow-hidden text-[14px] leading-snug antialiased lg:grid ${sidebarCollapsed ? 'lg:grid-cols-[68px_1fr]' : 'lg:grid-cols-[236px_1fr]'}`}>
-      <aside className="admin-sidebar hidden lg:flex lg:h-full lg:min-h-0 flex-col border-r border-white/[0.08] bg-[rgba(8,13,28,0.95)] overflow-hidden text-white">
-        <div className={`flex items-center gap-2.5 h-14 shrink-0 border-b border-white/[0.06] ${sidebarCollapsed ? 'justify-center px-2' : 'px-3'}`}>
+      <aside className="admin-sidebar hidden lg:flex lg:h-full lg:min-h-0 flex-col overflow-hidden">
+        <div className={`admin-sidebar-profile flex items-center gap-2.5 h-14 shrink-0 ${sidebarCollapsed ? 'justify-center px-2' : 'px-3'}`}>
           <div className="relative shrink-0">
             <input
               ref={staffAvatarInputRef}
@@ -3983,7 +3960,7 @@ export default function DashboardPage() {
               className="hidden"
               onChange={(e) => void onStaffAvatarPick(e)}
             />
-            <div className="w-9 h-9 rounded-full overflow-hidden border border-white/[0.08] bg-[#1a2550] flex items-center justify-center text-xs font-bold text-white">
+            <div className="w-9 h-9 rounded-full overflow-hidden border border-white/10 bg-gradient-to-br from-[#1e293b] to-[#312e81] flex items-center justify-center text-xs font-bold text-white">
               {profile.avatar_url ? (
                 <img src={profile.avatar_url} alt={`${profile.username} avatar`} className="w-full h-full object-cover" />
               ) : (
@@ -4012,7 +3989,7 @@ export default function DashboardPage() {
           {!sidebarCollapsed ? (
             <div className="min-w-0">
               <p className="text-[13px] font-semibold text-white truncate">{profile.username}</p>
-              <p className="text-[11px] text-[#8892b0] truncate flex items-center gap-1.5">
+              <p className="text-[11px] text-[var(--admin-chrome-text-muted)] truncate flex items-center gap-1.5">
                 <span className="w-1.5 h-1.5 rounded-full bg-[#2fd17f] shrink-0" aria-hidden />
                 {staffRoleLabel}
               </p>
@@ -4061,7 +4038,7 @@ export default function DashboardPage() {
             )
           })}
         </nav>
-        <div className="shrink-0 border-t border-white/[0.06] p-2.5">
+        <div className="admin-sidebar-footer shrink-0 p-2.5">
           <button
             type="button"
             onClick={() => void signOut()}
@@ -4075,11 +4052,11 @@ export default function DashboardPage() {
       </aside>
 
       <main className="flex flex-col min-h-0 w-full min-h-screen lg:min-h-0 lg:h-full overflow-hidden pb-[max(4.25rem,env(safe-area-inset-bottom))] lg:pb-0">
-        <header className="shrink-0 flex items-center gap-2 h-14 border-b border-white/[0.08] bg-[rgba(11,18,40,0.9)] backdrop-blur-md px-3 sm:px-4 text-white">
+        <header className="admin-topbar shrink-0 flex items-center gap-2 h-14 px-3 sm:px-4">
           <button
             type="button"
             onClick={() => setSidebarCollapsed((v) => !v)}
-            className="hidden lg:inline-flex h-9 w-9 shrink-0 items-center justify-center rounded-lg text-[#c4cbe6] hover:bg-white/[0.06] hover:text-white"
+            className="admin-chrome-btn hidden lg:inline-flex h-9 w-9 shrink-0 items-center justify-center rounded-lg"
             aria-label={sidebarCollapsed ? 'Expand sidebar' : 'Collapse sidebar'}
             title="Toggle sidebar"
           >
@@ -4088,7 +4065,7 @@ export default function DashboardPage() {
           <div className="flex-1 min-w-0">
             <h2 className="text-[16px] font-bold tracking-[-0.02em] text-white leading-tight truncate">{headerTitle}</h2>
             <nav className="admin-breadcrumb mt-0.5" aria-label="Breadcrumb">
-              <button type="button" onClick={() => switchTab('home')} className="hover:text-[#c4cbe6]">
+              <button type="button" onClick={() => switchTab('home')} className="admin-chrome-btn rounded-md px-0.5 -mx-0.5">
                 Home
               </button>
               <ChevronRight className="sep w-3 h-3" />
@@ -4099,13 +4076,13 @@ export default function DashboardPage() {
             <button
               type="button"
               onClick={() => router.push('/notifications')}
-              className="relative inline-flex h-9 w-9 items-center justify-center rounded-lg text-[#c4cbe6] hover:bg-white/[0.06] hover:text-white"
+              className="admin-chrome-btn relative inline-flex h-9 w-9 items-center justify-center rounded-lg"
               aria-label="Alerts"
               title="Alerts"
             >
               <Bell className="w-[18px] h-[18px]" />
               {staffNotifyUnread > 0 ? (
-                <span className="absolute top-1 right-1 min-w-4 h-4 px-1 rounded-full bg-[#ff3b5c] text-white text-[9px] font-bold flex items-center justify-center leading-none tabular-nums border-2 border-[#0b1228]">
+                <span className="absolute top-1 right-1 min-w-4 h-4 px-1 rounded-full bg-[#ff3b5c] text-white text-[9px] font-bold flex items-center justify-center leading-none tabular-nums border-2 border-[#0c1220]">
                   {staffNotifyUnread > 99 ? '99+' : staffNotifyUnread}
                 </span>
               ) : null}
@@ -4113,7 +4090,7 @@ export default function DashboardPage() {
             <button
               type="button"
               onClick={toggleFullscreen}
-              className="hidden sm:inline-flex h-9 w-9 items-center justify-center rounded-lg text-[#c4cbe6] hover:bg-white/[0.06] hover:text-white"
+              className="admin-chrome-btn hidden sm:inline-flex h-9 w-9 items-center justify-center rounded-lg"
               aria-label="Toggle fullscreen"
               title="Fullscreen"
             >
@@ -4123,7 +4100,7 @@ export default function DashboardPage() {
               type="button"
               onClick={() => void manualRefresh()}
               disabled={dashRefreshing || !profile.business_id}
-              className="inline-flex items-center gap-2 rounded-lg border border-white/[0.08] bg-white/[0.04] px-2.5 py-2 text-[13px] font-semibold text-[#c4cbe6] hover:text-white hover:bg-white/[0.06] disabled:opacity-40"
+              className="admin-chrome-btn-outline inline-flex items-center gap-2 rounded-lg px-2.5 py-2 text-[13px] font-semibold disabled:opacity-40"
             >
               <RefreshCw className={`w-4 h-4 ${dashRefreshing ? 'animate-spin' : ''}`} />
               <span className="hidden sm:inline">Refresh</span>
@@ -4131,7 +4108,7 @@ export default function DashboardPage() {
             <button
               type="button"
               onClick={() => void signOut()}
-              className="lg:hidden inline-flex h-9 w-9 items-center justify-center rounded-lg text-[#c4cbe6] hover:bg-white/[0.06] hover:text-white"
+              className="admin-chrome-btn lg:hidden inline-flex h-9 w-9 items-center justify-center rounded-lg"
               aria-label="Sign out"
             >
               <LogOut className="w-[18px] h-[18px]" />
@@ -4220,7 +4197,7 @@ export default function DashboardPage() {
             </div>
             <div className="admin-card">
               <div className="admin-card-header">
-                <Inbox className="w-4 h-4 text-[#f5d040]" />
+                <Inbox className="w-4 h-4 text-violet-600" />
                 <h3 className="admin-card-title">Recent Conversations</h3>
                 <div className="admin-card-tools">
                   <button
@@ -4280,9 +4257,9 @@ export default function DashboardPage() {
 
         <StaffTabPanel tab="post" activeTab={activeTab} mountedTabs={mountedTabs} render={() => (
           <section className="space-y-3 max-w-4xl">
-            <p className="text-[12px] text-slate-500 leading-relaxed">
+            <p className="text-[12px] admin-intro-text">
               Goes to the public feed for all approved customers. They can like and comment. Everyone approved gets an in-app notification when you publish. Email goes only to customers labeled{' '}
-              <strong className="text-slate-600">Active player</strong> or <strong className="text-slate-600">Account created</strong> on their support thread.
+              <strong className="text-slate-900">Active player</strong> or <strong className="text-slate-900">Account created</strong> on their support thread.
             </p>
 
             <div className="rounded-2xl border border-slate-200 bg-white shadow-sm p-3 space-y-3">
@@ -4299,7 +4276,7 @@ export default function DashboardPage() {
                     value={postTitle}
                     onChange={(e) => setPostTitle(e.target.value)}
                   />
-                  <p className="text-[11px] text-slate-500 px-1">Main line — shows first on the feed (bold).</p>
+                  <p className="text-[11px] text-slate-700 px-1">Main line — shows first on the feed (bold).</p>
                 </div>
               </div>
               <div className="space-y-1">
@@ -4310,7 +4287,7 @@ export default function DashboardPage() {
                   value={postBody}
                   onChange={(e) => setPostBody(e.target.value)}
                 />
-                <p className="text-[11px] text-slate-500 px-1">Optional — shows below the main line if you add text here.</p>
+                <p className="text-[11px] text-slate-700 px-1">Optional — shows below the main line if you add text here.</p>
               </div>
               {postImage ? (
                 <div className="relative flex items-center justify-center overflow-hidden rounded-xl border border-slate-200 bg-black/20 max-h-56">
@@ -4331,7 +4308,7 @@ export default function DashboardPage() {
                   onClick={() => postFileInputRef.current?.click()}
                   className="w-full flex items-center justify-center gap-2 rounded-xl py-2.5 text-sm font-semibold text-slate-500 hover:text-slate-900 hover:bg-slate-100 transition-colors"
                 >
-                  <ImagePlus className="w-4 h-4 text-[#f5d040]" />
+                  <ImagePlus className="w-4 h-4 text-violet-600" />
                   Photo
                 </button>
               </div>
@@ -4339,7 +4316,7 @@ export default function DashboardPage() {
                 type="button"
                 disabled={postBusy || (!postTitle.trim() && !postBody.trim() && !postImage)}
                 onClick={() => void publishAnnouncement()}
-                className="w-full rounded-xl py-2.5 font-semibold bg-gradient-to-r from-[#6f54ff] to-[#b8860b] disabled:opacity-40"
+                className="w-full rounded-xl py-2.5 font-semibold admin-btn-gradient"
               >
                 {postBusy ? 'Publishing...' : 'Publish to feed & notify customers'}
               </button>
@@ -4349,7 +4326,7 @@ export default function DashboardPage() {
               <div className="flex items-center justify-between gap-2 mb-3">
                 <h4 className="text-lg font-semibold text-slate-900">Your posts</h4>
                 {myAnnouncementsLoading ? (
-                  <Loader2 className="w-4 h-4 animate-spin text-[#f5d040]" />
+                  <Loader2 className="w-4 h-4 animate-spin admin-accent-spinner" />
                 ) : (
                   <span className="text-xs text-slate-500">{myAnnouncements.length} shown</span>
                 )}
@@ -4379,7 +4356,7 @@ export default function DashboardPage() {
                             <div className="flex flex-wrap items-center gap-2 text-xs text-slate-500 min-w-0">
                               <span>{timeAgo(a.created_at)}</span>
                               {a.hidden_at ? (
-                                <span className="rounded-md border border-amber-500/30 bg-amber-500/10 px-1.5 py-0.5 text-[10px] font-semibold uppercase tracking-wide text-amber-200">
+                                <span className="rounded-md border border-amber-300 bg-amber-50 px-1.5 py-0.5 text-[10px] font-semibold uppercase tracking-wide text-amber-800">
                                   Hidden
                                 </span>
                               ) : null}
@@ -4411,7 +4388,7 @@ export default function DashboardPage() {
                                   type="button"
                                   disabled={editPostBusy || !editPostTitle.trim() || !editPostBody.trim()}
                                   onClick={() => void saveEditPost()}
-                                  className="rounded-lg bg-gradient-to-r from-[#6f54ff] to-[#b8860b] px-3 py-2 text-xs font-semibold disabled:opacity-40"
+                                  className="rounded-lg admin-btn-gradient px-3 py-2 text-xs font-semibold"
                                 >
                                   {editPostBusy ? 'Saving...' : 'Save'}
                                 </button>
@@ -4453,7 +4430,7 @@ export default function DashboardPage() {
                             }
                             className="inline-flex items-center gap-1.5 rounded-lg px-1.5 py-0.5 -mx-1.5 text-slate-600 hover:text-slate-900 hover:bg-slate-100 transition-colors disabled:opacity-40 disabled:cursor-not-allowed disabled:hover:bg-transparent"
                           >
-                            <ThumbsUp className="w-4 h-4 text-[#f5d040]" />
+                            <ThumbsUp className="w-4 h-4 text-violet-600" />
                             {meta.likes} likes
                           </button>
                           <button
@@ -4479,7 +4456,7 @@ export default function DashboardPage() {
                                 : 'text-slate-600 hover:text-slate-900 hover:bg-slate-100'
                             }`}
                           >
-                            <ChatBubbleIcon className="text-[#f5d040]" size={16} strokeWidth={2} />
+                            <ChatBubbleIcon className="text-violet-600" size={16} strokeWidth={2} />
                             {meta.comments} comments
                           </button>
                           <button
@@ -4487,7 +4464,7 @@ export default function DashboardPage() {
                             onClick={() => void shareStaffAnnouncement(a)}
                             className="inline-flex items-center gap-1.5 rounded-lg px-1.5 py-0.5 -mx-1.5 text-slate-600 hover:text-slate-900 hover:bg-slate-100 transition-colors ml-auto"
                           >
-                            <Share2 className="w-4 h-4 text-[#f5d040]" />
+                            <Share2 className="w-4 h-4 text-violet-600" />
                             Share link
                           </button>
                         </div>
@@ -4551,7 +4528,7 @@ export default function DashboardPage() {
                                                   <div className="min-w-0">
                                                     <span className="font-semibold text-slate-900">{c.userName}</span>
                                                     {c.hidden_at ? (
-                                                      <span className="ml-2 text-[10px] font-semibold uppercase text-amber-200">
+                                                      <span className="ml-2 text-[10px] font-semibold uppercase text-amber-800">
                                                         Hidden
                                                       </span>
                                                     ) : null}
@@ -4577,7 +4554,7 @@ export default function DashboardPage() {
                                                         type="button"
                                                         disabled={commentModerationBusyId === c.id || !editCommentBody.trim()}
                                                         onClick={() => void saveEditComment()}
-                                                        className="rounded-lg bg-gradient-to-r from-[#6f54ff] to-[#b8860b] px-2.5 py-1.5 text-xs font-semibold disabled:opacity-40"
+                                                        className="rounded-lg admin-btn-gradient px-2.5 py-1.5 text-xs font-semibold"
                                                       >
                                                         Save
                                                       </button>
@@ -4591,7 +4568,7 @@ export default function DashboardPage() {
                                                     </div>
                                                   </div>
                                                 ) : (
-                                                  <p className="mt-0.5 text-[#d4dbf0] break-words whitespace-pre-wrap">{c.body}</p>
+                                                  <p className="mt-0.5 text-slate-800 break-words whitespace-pre-wrap">{c.body}</p>
                                                 )}
                                               </div>
                                               <div className="mt-1 ml-1 flex flex-wrap items-center gap-2">
@@ -4606,7 +4583,7 @@ export default function DashboardPage() {
                                                     )
                                                     setStaffReplyThreadDraft('')
                                                   }}
-                                                  className="text-[11px] font-semibold text-[#f5d040]"
+                                                  className="text-[11px] font-semibold text-violet-700"
                                                 >
                                                   Reply
                                                 </button>
@@ -4747,8 +4724,8 @@ export default function DashboardPage() {
               </p>
             ) : null}
             {profile.business_role === 'technical' ? (
-              <p className="text-[11px] text-slate-500 shrink-0 rounded-xl border border-orange-500/20 bg-orange-500/5 px-3 py-2">
-                Escalated threads from support appear here with full chat history. <strong className="text-[#fdba74]">Claim</strong> a thread to take over the same customer chat.
+              <p className="text-[11px] text-slate-700 shrink-0 rounded-xl border border-orange-200 bg-orange-50 px-3 py-2">
+                Escalated threads from support appear here with full chat history. <strong className="text-orange-800">Claim</strong> a thread to take over the same customer chat.
               </p>
             ) : null}
             <div className="flex items-center justify-between gap-2 flex-wrap shrink-0">
@@ -4759,7 +4736,7 @@ export default function DashboardPage() {
                   : activeTab === 'inbox-app'
                     ? inboxAppUnreadTotal
                     : inboxTechnicalUnreadTotal) > 0 ? (
-                  <span className="text-[10px] font-bold text-[#f5d040] bg-[rgba(141,99,255,0.2)] border border-[rgba(141,99,255,0.35)] rounded-md px-1.5 py-px tabular-nums">
+                  <span className="text-[10px] font-bold text-white bg-orange-500 border border-orange-600 rounded-md px-1.5 py-px tabular-nums">
                     {activeTab === 'inbox-website'
                       ? inboxWebsiteUnreadTotal
                       : activeTab === 'inbox-app'
@@ -4768,13 +4745,10 @@ export default function DashboardPage() {
                     new
                   </span>
                 ) : null}
-                <span className="text-[12px] text-slate-500 tabular-nums font-medium">
+                <span className="text-[12px] text-slate-600 tabular-nums font-medium">
                   {inboxSearchQuery.trim() || inboxThreadLabelFilterIds.length > 0
                     ? `${inboxDisplayList.length} of ${channelFilteredConvoList.length} threads`
                     : `${channelFilteredConvoList.length} threads`}
-                  {inboxShowsRecentCap && !inboxSearchQuery.trim() && inboxThreadLabelFilterIds.length === 0
-                    ? ` · ${INBOX_THREAD_LIMIT} most recent`
-                    : ''}
                 </span>
               </div>
               <div className="flex items-center gap-2">
@@ -4792,12 +4766,12 @@ export default function DashboardPage() {
 
             {inboxLoading ? (
               <div className="flex items-center justify-center py-12 text-slate-500">
-                <Loader2 className="w-6 h-6 animate-spin text-[#f5d040] mr-2" />
+                <Loader2 className="w-6 h-6 animate-spin admin-accent-spinner mr-2" />
                 Loading inbox…
               </div>
             ) : convoList.length === 0 ? (
               loadError ? (
-                <p className="text-sm text-red-300/90 rounded-xl border border-red-500/30 bg-red-500/10 px-3 py-2">
+                <p className="text-sm text-red-800 rounded-xl border border-red-200 bg-red-50 px-3 py-2">
                   Threads could not load — see the error banner above. Staff must have{' '}
                   <code className="text-red-200">profiles.business_id</code> matching conversations for this business.
                 </p>
@@ -4835,21 +4809,21 @@ export default function DashboardPage() {
                       <input
                         type="search"
                         className="w-full rounded-xl bg-transparent py-2 pl-8 pr-2 text-[13px] text-slate-800 placeholder:text-slate-400 outline-none focus:ring-1 focus:ring-[#6f54ff]/40"
-                        placeholder="Name, @user, preview, label... (finds older threads too)"
+                        placeholder="Name, @user, preview, label..."
                         value={inboxSearchQuery}
                         onChange={(e) => setInboxSearchQuery(e.target.value)}
                         aria-label="Search threads"
                       />
                     </div>
                     <div className="mt-2 flex flex-wrap gap-1.5 items-center">
-                        <span className="text-[10px] text-slate-400 w-full">Filter by label</span>
+                        <span className="text-[10px] font-semibold text-slate-600 w-full">Filter by label</span>
                         <button
                           type="button"
                           onClick={() => setInboxThreadLabelFilterIds([])}
                           className={`inline-flex rounded-md border px-1.5 py-0.5 text-[10px] font-semibold transition ${
                             inboxThreadLabelFilterIds.length === 0
-                              ? 'border-[#f5d040]/50 bg-[rgba(141,99,255,0.15)] text-[#c4b8ff] ring-1 ring-[#f5d040]/50'
-                              : 'border-white/[0.12] bg-slate-50 text-slate-500 opacity-90 hover:opacity-100 hover:text-slate-900'
+                              ? 'border-violet-300 bg-violet-50 text-violet-900 ring-1 ring-violet-300'
+                              : 'border-slate-200 bg-white text-slate-700 hover:bg-slate-50 hover:text-slate-900'
                           }`}
                         >
                           All in channel
@@ -4859,8 +4833,8 @@ export default function DashboardPage() {
                           onClick={() => selectInboxThreadLabelFilter(unreadLabelDef.id)}
                           className={`inline-flex max-w-full truncate rounded-md border px-1.5 py-0.5 text-[10px] font-semibold transition ${
                             inboxThreadLabelFilterIds.includes(unreadLabelDef.id)
-                              ? 'ring-1 ring-[#f5d040]/50'
-                              : 'opacity-80 hover:opacity-100'
+                              ? 'ring-2 ring-violet-400 ring-offset-1'
+                              : 'opacity-95 hover:opacity-100'
                           }`}
                           style={inboxLabelChipStyle(unreadLabelDef.color)}
                         >
@@ -4874,7 +4848,7 @@ export default function DashboardPage() {
                               type="button"
                               onClick={() => selectInboxThreadLabelFilter(lbl.id)}
                               className={`inline-flex max-w-full truncate rounded-md border px-1.5 py-0.5 text-[10px] font-semibold transition ${
-                                on ? 'ring-1 ring-[#f5d040]/50' : 'opacity-80 hover:opacity-100'
+                                on ? 'ring-2 ring-violet-400 ring-offset-1' : 'opacity-95 hover:opacity-100'
                               }`}
                               style={inboxLabelChipStyle(lbl.color)}
                             >
@@ -4884,30 +4858,24 @@ export default function DashboardPage() {
                         })}
                       </div>
                   </div>
-                  <div className="flex-1 min-h-0 overflow-y-auto overscroll-y-contain divide-y divide-slate-200">
-                    {inboxShowsRecentCap && !inboxSearchQuery.trim() && inboxThreadLabelFilterIds.length === 0 ? (
-                      <p className="px-3 py-2 text-[11px] text-slate-500 border-b border-slate-200">
-                        Showing the {INBOX_THREAD_LIMIT} most recently active threads. Chats do not expire — search by
-                        name to find older conversations (e.g. Bayern).
-                      </p>
-                    ) : inboxThreadLabelFilterIds.length > 0 ? (
-                      <p className="px-3 py-2 text-[11px] text-slate-500 border-b border-slate-200">
+                  <div className="admin-inbox-scroll flex-1 min-h-0 overflow-y-auto overscroll-y-contain divide-y divide-slate-200">
+                    {inboxThreadLabelFilterIds.length > 0 ? (
+                      <p className="px-3 py-2 text-[11px] text-slate-600 border-b border-slate-200">
                         {inboxDisplayList.length === 0
-                          ? 'No labeled threads in the recent load.'
-                          : `${inboxDisplayList.length} thread${inboxDisplayList.length === 1 ? '' : 's'} with this label in the recent load.`}{' '}
-                        Search by name to find older labeled conversations, or{' '}
+                          ? 'No labeled threads in this channel.'
+                          : `${inboxDisplayList.length} thread${inboxDisplayList.length === 1 ? '' : 's'} with this label.`}{' '}
                         <button
                           type="button"
                           onClick={() => setInboxThreadLabelFilterIds([])}
-                          className="font-semibold text-[#f5d040] hover:underline"
+                          className="font-semibold text-violet-700 hover:underline"
                         >
-                          view all threads
+                          View all threads
                         </button>
                         .
                       </p>
                     ) : null}
                     {inboxSearchExtraBusy && inboxSearchQuery.trim().length >= 2 ? (
-                      <p className="px-3 py-2 text-[11px] text-slate-500">Searching older threads...</p>
+                      <p className="px-3 py-2 text-[11px] text-slate-600">Searching threads...</p>
                     ) : null}
                     {inboxDisplayList.length === 0 ? (
                       <div className="px-3 py-4 space-y-3">
@@ -4915,10 +4883,12 @@ export default function DashboardPage() {
                           {convoListMerged.length === 0
                             ? 'No threads.'
                             : inboxSearchQuery.trim() || inboxThreadLabelFilterIds.length > 0
-                              ? 'No match in this inbox — check below for older threads or members.'
+                              ? 'No match in this inbox — check below for members without a thread yet.'
                               : activeTab === 'inbox-app'
                                 ? 'No Juwa App support threads yet. Threads appear here when customers sign in from the game app.'
-                                : 'No website support threads yet. Threads appear here when customers sign up on the website or message from the feed.'}
+                                : activeTab === 'inbox-technical'
+                                  ? 'No technical escalations yet. Support staff can escalate threads from Website or Juwa App inboxes.'
+                                  : 'No website support threads yet. Threads appear here when customers sign up on the website or message from the feed.'}
                         </p>
                         {inboxSearchMemberMatches.length > 0 ? (
                           <div className="rounded-xl border border-[#6f54ff]/30 bg-[#6f54ff]/8 p-2 space-y-1">
@@ -4942,7 +4912,7 @@ export default function DashboardPage() {
                                     type="button"
                                     disabled={starting}
                                     onClick={() => void openInboxThreadForMember(m.id)}
-                                    className="shrink-0 rounded-lg border border-[#6f54ff]/40 bg-[#6f54ff]/15 px-2.5 py-1 text-[12px] font-semibold text-[#c4b8ff] hover:bg-[#6f54ff]/25 disabled:opacity-40"
+                                    className="shrink-0 rounded-lg border border-violet-300 bg-violet-50 px-2.5 py-1 text-[12px] font-semibold text-violet-800 hover:bg-violet-100 disabled:opacity-40"
                                   >
                                     {starting ? 'Opening...' : 'Open chat'}
                                   </button>
@@ -4962,7 +4932,7 @@ export default function DashboardPage() {
                           key={item.id}
                           onClick={() => void openThread(item.id)}
                           className={`w-full text-left px-3 py-2.5 flex gap-2 items-start transition-colors ${
-                            active ? 'bg-[rgba(141,99,255,0.07)]' : 'hover:bg-slate-50'
+                            active ? 'bg-violet-50 border-l-2 border-l-violet-500' : 'hover:bg-slate-50'
                           }`}
                         >
                           <div className="w-9 h-9 rounded-[10px] bg-slate-100 flex items-center justify-center text-[12px] font-bold shrink-0 relative overflow-hidden border border-slate-200 text-slate-900">
@@ -4976,16 +4946,16 @@ export default function DashboardPage() {
                             <div className="flex items-center justify-between gap-2">
                               <p className="text-[13px] font-semibold text-slate-900 truncate">{item.customerName}</p>
                               <div className="shrink-0 text-right">
-                                <p className="text-[10px] text-slate-400">{timeAgo(item.updated_at)}</p>
+                                <p className="text-[10px] text-slate-600 font-medium">{timeAgo(item.updated_at)}</p>
                                 {item.unreadCount > 0 ? (
-                                  <span className="inline-flex mt-0.5 min-w-3.5 h-3.5 px-0.5 rounded-full bg-[#ff3b5c] text-slate-900 text-[8px] font-bold items-center justify-center tabular-nums border-2 border-[#000000]">
+                                  <span className="inline-flex mt-0.5 min-w-3.5 h-3.5 px-0.5 rounded-full bg-[#ff3b5c] text-white text-[8px] font-bold items-center justify-center tabular-nums">
                                     {item.unreadCount > 9 ? '9+' : item.unreadCount}
                                   </span>
                                 ) : null}
                               </div>
                             </div>
-                            <p className="text-[11px] text-slate-500 truncate">@{item.customerUsername}</p>
-                            <p className="text-[11px] text-slate-500 truncate mt-0.5 max-w-[min(100%,220px)]">{item.preview}</p>
+                            <p className="text-[11px] text-slate-600 truncate">@{item.customerUsername}</p>
+                            <p className="text-[11px] text-slate-800 truncate mt-0.5 max-w-[min(100%,220px)]">{item.preview}</p>
                             {displayLabels.length > 0 ? (
                               <div className="flex flex-wrap gap-1 mt-1.5 max-w-[min(100%,220px)]">
                                 {displayLabels.slice(0, 4).map((l) => (
@@ -5034,7 +5004,7 @@ export default function DashboardPage() {
                                   </span>
                                 ) : null}
                               </p>
-                              <p className="text-[11px] text-slate-500 truncate">@{selectedConvo.customerUsername} · Customer</p>
+                              <p className="text-[11px] text-slate-600 truncate">@{selectedConvo.customerUsername} · Customer</p>
                             </div>
                           </div>
                           <div className="flex items-center gap-0.5 shrink-0 relative">
@@ -5043,7 +5013,7 @@ export default function DashboardPage() {
                                 type="button"
                                 disabled={escalateBusy}
                                 onClick={() => void escalateSelectedThread()}
-                                className="inline-flex items-center gap-1 px-2 py-1.5 rounded-lg border border-orange-500/35 bg-orange-500/10 text-[11px] font-semibold text-orange-200 hover:bg-orange-500/20 disabled:opacity-40"
+                                className="inline-flex items-center gap-1 px-2 py-1.5 rounded-lg border border-orange-300 bg-orange-50 text-[11px] font-semibold text-orange-900 hover:bg-orange-100 disabled:opacity-40"
                                 title="Forward to Technical Support"
                               >
                                 {escalateBusy ? (
@@ -5061,7 +5031,7 @@ export default function DashboardPage() {
                                 setInboxLabelsPopoverOpen((v) => !v)
                               }}
                               className={`p-2 rounded-lg hover:bg-slate-100 ${
-                                inboxLabelsPopoverOpen ? 'text-slate-900 bg-white/10' : 'text-slate-500 hover:text-slate-900'
+                                inboxLabelsPopoverOpen ? 'text-slate-900 bg-slate-100' : 'text-slate-600 hover:text-slate-900'
                               }`}
                               aria-expanded={inboxLabelsPopoverOpen}
                               aria-label="Labels"
@@ -5095,7 +5065,7 @@ export default function DashboardPage() {
                                     <X className="w-4 h-4" />
                                   </button>
                                 </div>
-                                <div className="max-h-[min(50vh,280px)] overflow-y-auto p-2 space-y-0.5">
+                                <div className="admin-inbox-scroll max-h-[min(50vh,280px)] overflow-y-auto p-2 space-y-0.5">
                                   {inboxLabelCatalog.length === 0 ? (
                                     <p className="text-xs text-slate-500 px-2 py-3">
                                       No labels yet. Run the inbox labels migration in Supabase, then refresh.
@@ -5131,7 +5101,7 @@ export default function DashboardPage() {
                                               type="button"
                                               disabled={busy}
                                               onClick={() => void deleteInboxLabelDefinition(def.id)}
-                                              className="p-1.5 rounded-md text-slate-500 hover:text-red-300 hover:bg-red-500/10 disabled:opacity-40"
+                                              className="p-1.5 rounded-md text-slate-500 hover:text-red-600 hover:bg-red-50 disabled:opacity-40"
                                               aria-label={`Delete label ${def.name}`}
                                             >
                                               <Trash2 className="w-4 h-4" />
@@ -5161,7 +5131,7 @@ export default function DashboardPage() {
                                       type="button"
                                       disabled={inboxLabelCreateBusy || !newInboxLabelName.trim()}
                                       onClick={() => void createInboxLabelFromDraft()}
-                                      className="shrink-0 rounded-lg px-3 py-2 text-[12px] font-semibold bg-white/10 text-slate-900 hover:bg-white/[0.14] disabled:opacity-40"
+                                      className="shrink-0 rounded-lg px-3 py-2 text-[12px] font-semibold bg-violet-600 text-white hover:bg-violet-700 disabled:opacity-40"
                                     >
                                       {inboxLabelCreateBusy ? <Loader2 className="w-4 h-4 animate-spin" /> : 'Add'}
                                     </button>
@@ -5208,26 +5178,26 @@ export default function DashboardPage() {
                             })}
                           </div>
                               ) : (
-                          <p className="text-[10px] text-slate-400 pl-[42px] hidden sm:block">No labels — use the tag icon to add some.</p>
+                          <p className="text-[10px] text-slate-500 pl-[42px] hidden sm:block">No labels — use the tag icon to add some.</p>
                               )
                             })()}
                           </>
                         ) : null}
                       </div>
                       {showActiveEscalationBanner && selectedEscalation ? (
-                        <div className="mx-3 rounded-xl border border-orange-500/30 bg-orange-500/10 px-3 py-2 text-[12px] text-orange-100 shrink-0">
-                          <p className="font-semibold text-orange-50">
+                        <div className="mx-3 rounded-xl border border-orange-200 bg-orange-50 px-3 py-2.5 text-[12px] text-orange-950 shrink-0">
+                          <p className="font-semibold text-orange-950">
                             Technical Escalation ·{' '}
                             {selectedEscalation.status === 'pending' ? 'Awaiting claim' : 'In progress'}
                           </p>
-                          <p className="text-orange-200/90 mt-1 whitespace-pre-wrap break-words">{selectedEscalation.reason}</p>
+                          <p className="text-orange-900 mt-1 whitespace-pre-wrap break-words">{selectedEscalation.reason}</p>
                           <div className="flex flex-wrap gap-2 mt-2">
                             {canClaimEscalation(profile.business_role, selectedEscalation) ? (
                               <button
                                 type="button"
                                 disabled={escalationActionBusy}
                                 onClick={() => void claimSelectedEscalation()}
-                                className="inline-flex items-center gap-1.5 rounded-lg border border-orange-400/40 bg-orange-400/15 px-2.5 py-1.5 text-[12px] font-semibold text-orange-100 hover:bg-orange-400/25 disabled:opacity-40"
+                                className="inline-flex items-center gap-1.5 rounded-lg border border-orange-400 bg-orange-100 px-2.5 py-1.5 text-[12px] font-semibold text-orange-950 hover:bg-orange-200 disabled:opacity-40"
                               >
                                 {escalationActionBusy ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : null}
                                 Claim thread
@@ -5238,7 +5208,7 @@ export default function DashboardPage() {
                                 type="button"
                                 disabled={escalationActionBusy}
                                 onClick={() => void resolveSelectedEscalation()}
-                                className="inline-flex items-center gap-1.5 rounded-lg border border-emerald-500/40 bg-emerald-500/10 px-2.5 py-1.5 text-[12px] font-semibold text-emerald-200 hover:bg-emerald-500/20 disabled:opacity-40"
+                                className="inline-flex items-center gap-1.5 rounded-lg border border-emerald-400 bg-emerald-50 px-2.5 py-1.5 text-[12px] font-semibold text-emerald-900 hover:bg-emerald-100 disabled:opacity-40"
                               >
                                 Mark resolved
                               </button>
@@ -5307,10 +5277,10 @@ export default function DashboardPage() {
                           </div>
                         </div>
                       ) : null}
-                      <div ref={threadScrollRef} className="admin-inbox-chat-messages p-3 space-y-2">
+                      <div ref={threadScrollRef} className="admin-inbox-chat-messages p-3 pb-4 space-y-3">
                         {threadLoading ? (
                           <div className="flex justify-center py-12">
-                            <Loader2 className="w-6 h-6 animate-spin text-[#f5d040]" />
+                            <Loader2 className="w-6 h-6 animate-spin admin-accent-spinner" />
                           </div>
                         ) : threadMessages.length === 0 ? (
                           <p className="text-sm text-slate-500 py-6 text-center">No messages yet. Say hello below.</p>
@@ -5341,11 +5311,11 @@ export default function DashboardPage() {
                                     title={teamLine}
                                   >
                                     {teamLine}
-                                    {isInternal ? <span className="text-amber-300/90"> · Internal</span> : null}
+                                    {isInternal ? <span className="text-amber-700 font-semibold"> · Internal</span> : null}
                                   </p>
                                 ) : null}
                                 <div
-                                  className={`flex w-full min-w-0 items-end gap-1 ${
+                                  className={`flex w-full items-end gap-1 ${
                                     isFromTeam ? 'justify-end' : 'justify-start'
                                   }`}
                                 >
@@ -5364,71 +5334,66 @@ export default function DashboardPage() {
                                     </button>
                                   ) : null}
                                   <div
-                                    className={`flex flex-col min-w-0 ${isFromTeam ? 'items-end' : 'items-start'}`}
+                                    className={`flex flex-col max-w-[min(88%,36rem)] ${isFromTeam ? 'items-end' : 'items-start'}`}
                                   >
-                                  <div
-                                    className={
-                                      imageOnly
-                                        ? 'w-fit max-w-[min(85%,280px)] shrink-0'
-                                        : `w-fit max-w-[min(85%,24rem)] shrink-0 rounded-2xl text-sm ${
-                                            isInternal
-                                              ? 'border border-dashed border-amber-500/35 bg-amber-500/10 text-amber-50 px-3 py-2'
-                                              : isFromTeam
-                                                ? 'bg-[#6f54ff] text-slate-900 px-3 py-2'
-                                                : 'bg-slate-50 text-slate-800 px-3 py-2'
-                                          }`
-                                    }
-                                  >
-                                    {replyEmbed && !imageOnly ? (
-                                      <QuotedMessageBlock
-                                        reply={replyEmbed}
-                                        isFromTeam={isFromTeam}
-                                        customerId={selectedConvo.customer_id}
-                                      />
-                                    ) : null}
-                                    {hasImage ? (
-                                      imageOnly ? (
-                                        <ChatMessageMedia
-                                          imageUrl={m.image_url!}
-                                          tone={isInternal ? 'internal' : isFromTeam ? 'team' : 'customer'}
+                                    <div
+                                      className={
+                                        imageOnly
+                                          ? 'admin-inbox-msg-bubble w-max max-w-full'
+                                          : `admin-inbox-msg-bubble w-max max-w-full rounded-2xl text-sm leading-relaxed ${
+                                              isInternal
+                                                ? 'border border-dashed border-amber-400 bg-amber-50 text-amber-950 px-3 py-2'
+                                                : isFromTeam
+                                                  ? 'bg-[#6f54ff] text-white px-3 py-2'
+                                                  : 'bg-white border border-slate-200 text-slate-900 px-3 py-2 shadow-sm'
+                                            }`
+                                      }
+                                    >
+                                      {replyEmbed && !imageOnly ? (
+                                        <QuotedMessageBlock
+                                          reply={replyEmbed}
+                                          isFromTeam={isFromTeam}
+                                          customerId={selectedConvo.customer_id}
                                         />
-                                      ) : (
-                                        <ChatMessageMedia
-                                          imageUrl={m.image_url!}
-                                          caption={showText ? m.body : null}
-                                          showCaption={showText}
-                                          tone={isInternal ? 'internal' : isFromTeam ? 'team' : 'customer'}
-                                          className="mb-1"
+                                      ) : null}
+                                      {hasImage ? (
+                                        imageOnly ? (
+                                          <ChatMessageMedia
+                                            imageUrl={m.image_url!}
+                                            tone={isInternal ? 'internal' : isFromTeam ? 'team' : 'customer'}
+                                          />
+                                        ) : (
+                                          <ChatMessageMedia
+                                            imageUrl={m.image_url!}
+                                            caption={showText ? m.body : null}
+                                            showCaption={showText}
+                                            tone={isInternal ? 'internal' : isFromTeam ? 'team' : 'customer'}
+                                            className="mb-1"
+                                          />
+                                        )
+                                      ) : null}
+                                      {!hasImage && replyEmbed ? (
+                                        <QuotedMessageBlock
+                                          reply={replyEmbed}
+                                          isFromTeam={isFromTeam}
+                                          customerId={selectedConvo.customer_id}
                                         />
-                                      )
-                                    ) : null}
-                                    {!hasImage && replyEmbed ? (
-                                      <QuotedMessageBlock
-                                        reply={replyEmbed}
-                                        isFromTeam={isFromTeam}
-                                        customerId={selectedConvo.customer_id}
-                                      />
-                                    ) : null}
-                                    {!hasImage && showText ? (
-                                      <LinkifiedText
-                                        text={m.body}
-                                        className="whitespace-pre-wrap break-words"
-                                        linkClassName={isFromTeam ? 'text-slate-900' : 'text-[#9eb4ff]'}
-                                      />
-                                    ) : null}
-                                    {!imageOnly ? (
-                                      <p
-                                        className={`text-[10px] mt-1 ${isFromTeam ? 'text-slate-900/70' : 'text-slate-500'}`}
-                                      >
-                                        {timeAgo(m.created_at)}
-                                      </p>
-                                    ) : null}
-                                  </div>
-                                  {imageOnly ? (
-                                    <p className="text-[10px] mt-1 px-0.5 text-slate-500">
+                                      ) : null}
+                                      {!hasImage && showText ? (
+                                        <LinkifiedText
+                                          text={m.body}
+                                          className="admin-inbox-msg-text whitespace-pre-wrap"
+                                          linkClassName={isFromTeam ? 'text-white underline' : 'text-violet-700 underline'}
+                                        />
+                                      ) : null}
+                                    </div>
+                                    <p
+                                      className={`text-[10px] mt-1 px-0.5 font-medium tabular-nums ${
+                                        isFromTeam ? 'text-slate-500 text-right' : 'text-slate-500'
+                                      }`}
+                                    >
                                       {timeAgo(m.created_at)}
                                     </p>
-                                  ) : null}
                                   </div>
                                   {isFromTeam && !isInternal ? (
                                     <button
@@ -5570,7 +5535,7 @@ export default function DashboardPage() {
                                     onChange={(e) => setCannedPickerQuery(e.target.value)}
                                   />
                                 </div>
-                                <div className="flex-1 min-h-0 overflow-y-auto p-2 space-y-1">
+                                <div className="admin-inbox-scroll flex-1 min-h-0 overflow-y-auto p-2 space-y-1">
                                   {filteredCannedPickerList.length === 0 ? (
                                     <p className="px-2 py-4 text-center text-[12px] text-slate-500">
                                       {cannedReplies.length === 0
@@ -5594,7 +5559,7 @@ export default function DashboardPage() {
                                             type="button"
                                             disabled={replyBusy}
                                             onClick={() => insertCannedReplyIntoDraft(r)}
-                                            className="rounded-lg bg-gradient-to-r from-[#6f54ff] to-[#b8860b] px-2.5 py-1.5 text-[11px] font-semibold text-slate-900 disabled:opacity-40"
+                                            className="rounded-lg admin-btn-gradient px-2.5 py-1.5 text-[11px] font-semibold"
                                           >
                                             Insert
                                           </button>
@@ -5611,7 +5576,7 @@ export default function DashboardPage() {
                                             type="button"
                                             disabled={cannedDeleteBusyId === r.id}
                                             onClick={() => void deleteCannedReply(r.id)}
-                                            className="inline-flex items-center gap-1 rounded-lg border border-red-500/25 px-2 py-1.5 text-[11px] font-medium text-red-300/90 hover:bg-red-500/10 disabled:opacity-40"
+                                            className="inline-flex items-center gap-1 rounded-lg border border-red-200 px-2 py-1.5 text-[11px] font-medium text-red-700 hover:bg-red-50 disabled:opacity-40"
                                           >
                                             {cannedDeleteBusyId === r.id ? (
                                               <Loader2 className="w-3 h-3 animate-spin" />
@@ -5646,7 +5611,7 @@ export default function DashboardPage() {
                                       type="button"
                                       disabled={cannedSaveBusy}
                                       onClick={() => void saveCannedReplyForm()}
-                                      className="rounded-lg bg-white/10 px-3 py-2 text-[12px] font-semibold text-slate-900 hover:bg-white/[0.14] disabled:opacity-40"
+                                      className="rounded-lg bg-violet-600 px-3 py-2 text-[12px] font-semibold text-white hover:bg-violet-700 disabled:opacity-40"
                                     >
                                       {cannedSaveBusy ? <Loader2 className="h-4 w-4 animate-spin" /> : cannedEditId ? 'Save changes' : 'Save reply'}
                                     </button>
@@ -5666,7 +5631,7 @@ export default function DashboardPage() {
                           </div>
                           <textarea
                             rows={1}
-                            className="flex-1 min-w-0 bg-slate-50 border border-slate-200 rounded-xl px-3 py-2.5 text-sm outline-none focus:border-[#6f54ff] resize-none min-h-[42px] max-h-32"
+                            className="flex-1 min-w-0 bg-white border border-slate-200 rounded-xl px-3 py-2.5 text-sm text-slate-900 outline-none focus:border-[#6f54ff] resize-none min-h-[42px] max-h-32"
                             placeholder={replyIsInternal ? 'Internal note for staff...' : 'Reply or add a caption...'}
                             value={replyDraft}
                             onChange={(e) => setReplyDraft(e.target.value)}
@@ -5681,12 +5646,12 @@ export default function DashboardPage() {
                             type="button"
                             disabled={replyBusy || (!replyDraft.trim() && !replyPendingImage)}
                             onClick={() => void sendReply()}
-                            className="shrink-0 rounded-xl px-3.5 py-2.5 font-semibold bg-gradient-to-r from-[#6f54ff] to-[#b8860b] disabled:opacity-40"
+                            className="shrink-0 rounded-xl px-3.5 py-2.5 font-semibold admin-btn-gradient"
                           >
                             Send
                           </button>
                         </div>
-                        <p className="text-[10px] text-slate-400 hidden sm:block">
+                        <p className="text-[10px] text-slate-500 hidden sm:block">
                           Photos only (no video). Quick replies support {'{customer_name}'}, {'{username}'}, and {'{business}'} in the saved
                           message.
                         </p>
@@ -5708,19 +5673,19 @@ export default function DashboardPage() {
         <StaffTabPanel tab="users" activeTab={activeTab} mountedTabs={mountedTabs} render={() => (
           <section className="space-y-4">
             {usersRefreshing ? (
-              <p className="text-[11px] text-slate-500 flex items-center gap-1.5">
+              <p className="text-[11px] text-slate-700 flex items-center gap-1.5">
                 <Loader2 className="w-3.5 h-3.5 animate-spin" />
                 Refreshing members…
               </p>
             ) : null}
             {usersLoading ? (
               <div className="flex items-center justify-center py-12 text-slate-500">
-                <Loader2 className="w-6 h-6 animate-spin text-[#f5d040] mr-2" />
+                <Loader2 className="w-6 h-6 animate-spin admin-accent-spinner mr-2" />
                 Loading members…
               </div>
             ) : (
             <>
-            <p className="text-[12px] text-slate-500 leading-relaxed">
+            <p className="text-[12px] admin-intro-text">
               New customers join instantly with a welcome message. Manage active members here — suspend or remove accounts as needed. The Pending tab
               shows any legacy signups still awaiting manual review.
             </p>
@@ -5743,7 +5708,7 @@ export default function DashboardPage() {
                     setActiveMemberQuery('')
                   }}
                   className={`flex-1 rounded-lg py-1.5 text-[11px] font-semibold transition-colors ${
-                    usersPanelTab === 'pending' ? 'bg-[rgba(141,99,255,0.15)] text-[#f5d040]' : 'text-slate-500 hover:text-slate-600'
+                    usersPanelTab === 'pending' ? 'admin-subtab-active' : 'admin-subtab'
                   }`}
                 >
                   Pending ({pendingCustomers.length})
@@ -5752,7 +5717,7 @@ export default function DashboardPage() {
                   type="button"
                   onClick={() => setUsersPanelTab('active')}
                   className={`flex-1 rounded-lg py-1.5 text-[11px] font-semibold transition-colors ${
-                    usersPanelTab === 'active' ? 'bg-[rgba(141,99,255,0.15)] text-[#f5d040]' : 'text-slate-500 hover:text-slate-600'
+                    usersPanelTab === 'active' ? 'admin-subtab-active' : 'admin-subtab'
                   }`}
                 >
                   Active ({activeMembers.length})
@@ -5764,7 +5729,7 @@ export default function DashboardPage() {
                     setActiveMemberQuery('')
                   }}
                   className={`flex-1 rounded-lg py-1.5 text-[11px] font-semibold transition-colors ${
-                    usersPanelTab === 'suspended' ? 'bg-[rgba(141,99,255,0.15)] text-[#f5d040]' : 'text-slate-500 hover:text-slate-600'
+                    usersPanelTab === 'suspended' ? 'admin-subtab-active' : 'admin-subtab'
                   }`}
                 >
                   Suspended ({suspendedMembers.length})
@@ -5773,13 +5738,13 @@ export default function DashboardPage() {
 
               {usersPanelTab === 'pending' ? (
                 <div className="space-y-2">
-                  <h4 className="text-sm font-semibold tracking-wide text-slate-500 uppercase">Pending approval</h4>
-                  <p className="text-slate-500 text-xs">
-                    Status: <span className="text-amber-300 font-medium">pending</span> — new signups are auto-approved; this list is for older accounts only.
+                  <h4 className="text-sm admin-section-heading">Pending approval</h4>
+                  <p className="text-slate-700 text-xs">
+                    Status: <span className="text-amber-800 font-semibold">pending</span> — new signups are auto-approved; this list is for older accounts only.
                   </p>
                   <div className="rounded-2xl border border-slate-200 bg-slate-50 p-2.5 sm:p-3 space-y-2.5 shadow-sm">
                     {pendingCustomers.length === 0 ? (
-                      <p className="text-sm text-slate-500 py-4 text-center">No pending signups — all new accounts are approved automatically.</p>
+                      <p className="text-sm admin-empty-state py-4 text-center">No pending signups — all new accounts are approved automatically.</p>
                     ) : (
                       pendingCustomers.map((cust) => (
                         <article key={cust.id} className="rounded-xl border border-slate-200 bg-white p-3 space-y-2.5">
@@ -5805,8 +5770,8 @@ export default function DashboardPage() {
                                     <span
                                       className={`ml-1 inline-block rounded-full px-1.5 py-[1px] text-[10px] font-semibold uppercase tracking-wide ${
                                         cust.email_verified
-                                          ? 'bg-emerald-500/15 text-emerald-300'
-                                          : 'bg-amber-500/15 text-amber-300'
+                                          ? 'admin-badge-emerald'
+                                          : 'admin-badge-amber'
                                       }`}
                                     >
                                       {cust.email_verified ? 'Verified' : 'Unverified'}
@@ -5860,7 +5825,7 @@ export default function DashboardPage() {
                               type="button"
                               disabled={reviewBusyId === cust.id}
                               onClick={() => void reviewCustomer(cust.id, 'block')}
-                              className="rounded-xl py-2 font-semibold bg-white/10 hover:bg-white/15 disabled:opacity-40"
+                              className="rounded-xl py-2 font-semibold admin-btn-violet disabled:opacity-40"
                             >
                               Block
                             </button>
@@ -5874,8 +5839,8 @@ export default function DashboardPage() {
 
               {usersPanelTab === 'active' ? (
                 <div className="space-y-2">
-                  <h4 className="text-sm font-semibold tracking-wide text-slate-500 uppercase">Active members</h4>
-                  <p className="text-slate-500 text-xs">
+                  <h4 className="text-sm admin-section-heading">Active members</h4>
+                  <p className="text-slate-700 text-xs">
                     Customers approved for the platform who follow your business or have a support thread with you.
                   </p>
                   {activeMembers.length > 0 ? (
@@ -5903,7 +5868,7 @@ export default function DashboardPage() {
                       ) : null}
                     </div>
                   ) : null}
-                  <div className="rounded-2xl border border-slate-200 bg-slate-50 divide-y divide-slate-200 shadow-sm max-h-[380px] overflow-y-auto">
+                  <div className="rounded-2xl border border-slate-200 bg-slate-50 divide-y divide-slate-200 shadow-sm max-h-[380px] overflow-y-auto admin-inbox-scroll">
                     {activeMemberQuery.trim().length >= 2 &&
                     activeMemberLookup &&
                     !activeMembers.some((m) => m.id === activeMemberLookup.id) ? (
@@ -5977,8 +5942,8 @@ export default function DashboardPage() {
                                   }
                                   className={`inline-flex items-center gap-1.5 rounded-lg border px-2.5 py-1.5 text-[13px] disabled:opacity-40 ${
                                     composeOpen
-                                      ? 'border-[#6f54ff]/50 bg-[#6f54ff]/15 text-[#c4b8ff]'
-                                      : 'border-[#6f54ff]/40 bg-[#6f54ff]/10 text-[#b8adff] hover:bg-[#6f54ff]/20'
+                                      ? 'admin-select-active'
+                                      : 'admin-select-idle hover:border-slate-300'
                                   }`}
                                 >
                                   <Send className="w-4 h-4 shrink-0" />
@@ -5988,7 +5953,7 @@ export default function DashboardPage() {
                                   type="button"
                                   disabled={modBusyId === m.id}
                                   onClick={() => void moderateSuspension(m.id, 'suspend', label)}
-                                  className="inline-flex items-center gap-1.5 rounded-lg border border-amber-500/40 bg-amber-500/10 px-2.5 py-1.5 text-[13px] text-amber-200 hover:bg-amber-500/20 disabled:opacity-40"
+                                  className="inline-flex items-center gap-1.5 rounded-lg border admin-btn-amber disabled:opacity-40 px-2.5 py-1.5 text-[13px]"
                                 >
                                   <Ban className="w-4 h-4 shrink-0" />
                                   {modBusyId === m.id ? '—' : 'Suspend'}
@@ -5997,7 +5962,7 @@ export default function DashboardPage() {
                                   type="button"
                                   disabled={removeCustomerBusyId === m.id}
                                   onClick={() => void removeCustomer(m.id, label)}
-                                  className="inline-flex items-center gap-1.5 rounded-lg border border-red-500/40 bg-red-500/10 px-2.5 py-1.5 text-[13px] text-red-200 hover:bg-red-500/20 disabled:opacity-40"
+                                  className="inline-flex items-center gap-1.5 rounded-lg border admin-btn-red disabled:opacity-40 px-2.5 py-1.5 text-[13px]"
                                 >
                                   <Trash2 className="w-4 h-4 shrink-0" />
                                   {removeCustomerBusyId === m.id ? '—' : 'Remove'}
@@ -6025,7 +5990,7 @@ export default function DashboardPage() {
                                   type="button"
                                   disabled={memberSending || !memberDraft.trim()}
                                   onClick={() => void sendMessageToActiveMember(m.id)}
-                                  className="shrink-0 inline-flex items-center gap-1.5 rounded-xl px-3 py-2 text-sm font-semibold bg-gradient-to-r from-[#6f54ff] to-[#b8860b] disabled:opacity-40"
+                                  className="shrink-0 inline-flex items-center gap-1.5 rounded-xl px-3 py-2 text-sm font-semibold admin-btn-gradient"
                                 >
                                   {memberSending ? (
                                     <Loader2 className="w-4 h-4 animate-spin" />
@@ -6046,11 +6011,11 @@ export default function DashboardPage() {
 
               {usersPanelTab === 'suspended' ? (
                 <div className="space-y-2">
-                  <h4 className="text-sm font-semibold tracking-wide text-slate-500 uppercase">Suspended</h4>
-                  <p className="text-slate-500 text-xs">
+                  <h4 className="text-sm admin-section-heading">Suspended</h4>
+                  <p className="text-slate-700 text-xs">
                     These customers cannot use the app until you unsuspend them. Actions are recorded in the moderation log.
                   </p>
-                  <div className="rounded-2xl border border-amber-500/20 bg-slate-50 divide-y divide-slate-200 shadow-sm max-h-[340px] overflow-y-auto">
+                  <div className="rounded-2xl border border-amber-200 bg-slate-50 divide-y divide-slate-200 shadow-sm max-h-[340px] overflow-y-auto admin-inbox-scroll">
                     {suspendedMembers.length === 0 ? (
                       <p className="text-sm text-slate-500 py-6 px-4 text-center">No suspended members for this business.</p>
                     ) : (
@@ -6070,7 +6035,7 @@ export default function DashboardPage() {
                                 type="button"
                                 disabled={modBusyId === m.id}
                                 onClick={() => void moderateSuspension(m.id, 'unsuspend', label)}
-                                className="inline-flex items-center gap-1.5 rounded-lg border border-emerald-500/40 bg-emerald-500/10 px-2.5 py-1.5 text-[13px] text-emerald-200 hover:bg-emerald-500/20 disabled:opacity-40"
+                                className="inline-flex items-center gap-1.5 rounded-lg border admin-btn-emerald disabled:opacity-40 px-2.5 py-1.5 text-[13px]"
                               >
                                 <UserCheck className="w-4 h-4 shrink-0" />
                                 {modBusyId === m.id ? '—' : 'Unsuspend'}
@@ -6079,7 +6044,7 @@ export default function DashboardPage() {
                                 type="button"
                                 disabled={removeCustomerBusyId === m.id}
                                 onClick={() => void removeCustomer(m.id, label)}
-                                className="inline-flex items-center gap-1.5 rounded-lg border border-red-500/40 bg-red-500/10 px-2.5 py-1.5 text-[13px] text-red-200 hover:bg-red-500/20 disabled:opacity-40"
+                                className="inline-flex items-center gap-1.5 rounded-lg border admin-btn-red disabled:opacity-40 px-2.5 py-1.5 text-[13px]"
                               >
                                 <Trash2 className="w-4 h-4 shrink-0" />
                                 {removeCustomerBusyId === m.id ? '—' : 'Remove'}
@@ -6100,10 +6065,10 @@ export default function DashboardPage() {
         {isAdmin ? (
         <StaffTabPanel tab="team" activeTab={activeTab} mountedTabs={mountedTabs} render={() => (
           <section className="space-y-4 max-w-3xl">
-            <p className="text-[12px] text-slate-500 leading-relaxed">
-              Create <strong className="text-slate-600">support</strong> accounts for Juwa App / Website inboxes, and{' '}
-              <strong className="text-[#fdba74]">technical</strong> accounts for the escalations queue. Technical staff sign in at{' '}
-              <Link href="/login/technical" className="text-[#fdba74] hover:underline font-medium">
+            <p className="text-[12px] admin-intro-text">
+              Create <strong className="text-slate-900">support</strong> accounts for Juwa App / Website inboxes, and{' '}
+              <strong className="admin-link-orange">technical</strong> accounts for the escalations queue. Technical staff sign in at{' '}
+              <Link href="/login/technical" className="admin-link-orange hover:underline font-medium">
                 /login/technical
               </Link>{' '}
               (separate from main staff login).
@@ -6129,12 +6094,12 @@ export default function DashboardPage() {
                           onClick={() => setNewStaffInboxScope(scope)}
                           className={`rounded-xl border px-3 py-2.5 text-left transition ${
                             active
-                              ? 'border-[#f5d040]/50 bg-[rgba(141,99,255,0.12)] ring-1 ring-[#f5d040]/40'
-                              : 'border-slate-200 bg-slate-50 hover:border-slate-300'
+                              ? 'admin-select-active ring-1 ring-violet-300'
+                              : 'admin-select-idle'
                           }`}
                         >
                           <p className="text-[13px] font-semibold text-slate-900">{supportScopeShortLabel(scope)}</p>
-                          <p className="text-[10px] text-slate-500 mt-0.5 leading-snug">{supportScopeLabel(scope)}</p>
+                          <p className="text-[10px] text-slate-600 mt-0.5 leading-snug">{supportScopeLabel(scope)}</p>
                         </button>
                       )
                     })}
@@ -6204,7 +6169,7 @@ export default function DashboardPage() {
                 type="button"
                 disabled={createStaffBusy}
                 onClick={() => void createSupportStaff()}
-                className="w-full rounded-xl py-2.5 font-semibold bg-gradient-to-r from-[#6f54ff] to-[#b8860b] disabled:opacity-40 flex items-center justify-center gap-2"
+                className="w-full rounded-xl py-2.5 font-semibold admin-btn-gradient flex items-center justify-center gap-2"
               >
                 {createStaffBusy ? <Loader2 className="w-4 h-4 animate-spin" /> : null}
                 {createStaffBusy ? 'Creating...' : 'Create staff account'}
@@ -6214,13 +6179,13 @@ export default function DashboardPage() {
 
             <div className="rounded-2xl border border-orange-500/20 bg-white shadow-sm p-4 space-y-3">
               <div className="flex items-center gap-2">
-                <Wrench className="w-4 h-4 text-orange-300 shrink-0" aria-hidden />
+                <Wrench className="w-4 h-4 text-orange-700 shrink-0" aria-hidden />
                 <h3 className="text-sm font-semibold text-slate-900">Add technical staff</h3>
               </div>
-              <p className="text-[11px] text-slate-500">
-                Technical agents use a <strong className="text-[#fdba74]">separate login</strong> at{' '}
-                <code className="text-[#fdba74]/90 text-[10px]">/login/technical</code> and only see the{' '}
-                <strong className="text-[#fdba74]">Technical Escalations</strong> inbox with full chat history. Up to 4 technical agents.
+              <p className="text-[11px] text-slate-700">
+                Technical agents use a <strong className="text-orange-800">separate login</strong> at{' '}
+                <code className="text-orange-800 text-[10px]">/login/technical</code> and only see the{' '}
+                <strong className="text-orange-800">Technical Escalations</strong> inbox with full chat history. Up to 4 technical agents.
               </p>
               <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
                 <input
@@ -6287,8 +6252,8 @@ export default function DashboardPage() {
 
             <div className="rounded-2xl border border-slate-200 bg-white shadow-sm overflow-hidden">
               <div className="px-3 py-2 border-b border-slate-200 flex items-center justify-between gap-2">
-                <h3 className="text-[10px] font-bold uppercase tracking-[0.16em] text-slate-500">Team roster</h3>
-                {teamLoadBusy ? <Loader2 className="w-4 h-4 animate-spin text-[#f5d040]" /> : null}
+                <h3 className="text-[10px] font-bold uppercase tracking-[0.16em] text-slate-700">Team roster</h3>
+                {teamLoadBusy ? <Loader2 className="w-4 h-4 animate-spin admin-accent-spinner" /> : null}
               </div>
               <div className="divide-y divide-slate-200">
                 {teamRows.length === 0 && !teamLoadBusy ? (
@@ -6305,7 +6270,7 @@ export default function DashboardPage() {
                           : 'Technical staff'
                     return (
                       <div key={roleGroup}>
-                        <p className="px-3 py-2 text-[10px] font-bold uppercase tracking-[0.14em] text-slate-400 bg-slate-50">
+                        <p className="px-3 py-2 text-[10px] font-bold uppercase tracking-[0.14em] text-slate-700 bg-slate-50">
                           {sectionTitle} ({rows.length})
                         </p>
                         {rows.map((row) => {
@@ -6327,7 +6292,7 @@ export default function DashboardPage() {
                               : isTechnical
                                 ? 'Technical · Escalations queue'
                                 : 'Support'}
-                            {removed ? <span className="text-red-300/90"> — removed</span> : null}
+                            {removed ? <span className="text-red-700 font-medium"> — removed</span> : null}
                           </p>
                           {isSupport && !removed ? (
                             <p className="text-[11px] text-slate-500 mt-0.5">{supportScopeLabel(rowScope)}</p>
@@ -6352,14 +6317,14 @@ export default function DashboardPage() {
                                 <option value="app">Juwa App only</option>
                               </select>
                               {scopeUpdateBusyId === row.id ? (
-                                <Loader2 className="w-3.5 h-3.5 animate-spin text-[#f5d040]" aria-hidden />
+                                <Loader2 className="w-3.5 h-3.5 animate-spin admin-accent-spinner" aria-hidden />
                               ) : null}
                             </label>
                             <button
                             type="button"
                             disabled={removeStaffBusyId === row.id}
                             onClick={() => void removeSupportMember(row.id, label)}
-                            className="inline-flex items-center gap-1.5 rounded-lg border border-red-500/40 bg-red-500/10 px-2.5 py-1.5 text-[12px] text-red-200 hover:bg-red-500/20 disabled:opacity-40"
+                            className="inline-flex items-center gap-1.5 rounded-lg border admin-btn-red disabled:opacity-40 px-2.5 py-1.5 text-[12px]"
                           >
                             <Trash2 className="w-3.5 h-3.5 shrink-0" />
                             {removeStaffBusyId === row.id ? '—' : 'Remove'}
@@ -6371,7 +6336,7 @@ export default function DashboardPage() {
                             type="button"
                             disabled={removeStaffBusyId === row.id}
                             onClick={() => void removeSupportMember(row.id, label)}
-                            className="inline-flex items-center gap-1.5 rounded-lg border border-red-500/40 bg-red-500/10 px-2.5 py-1.5 text-[12px] text-red-200 hover:bg-red-500/20 disabled:opacity-40"
+                            className="inline-flex items-center gap-1.5 rounded-lg border admin-btn-red disabled:opacity-40 px-2.5 py-1.5 text-[12px]"
                           >
                             <Trash2 className="w-3.5 h-3.5 shrink-0" />
                             {removeStaffBusyId === row.id ? '—' : 'Remove'}
@@ -6392,15 +6357,15 @@ export default function DashboardPage() {
 
         <StaffTabPanel tab="notify" activeTab={activeTab} mountedTabs={mountedTabs} render={() => (
           <section className="space-y-3 max-w-3xl">
-            <p className="text-[12px] text-slate-500 leading-relaxed">
-              Sends an <strong className="text-slate-600">in-app notification</strong> and <strong className="text-slate-600">email</strong> to each recipient (bell / Notifications screen).{' '}
-              This is <strong className="text-slate-600">not</strong> SMS, email, or a DM in their support thread — only the notifications list.
+            <p className="text-[12px] admin-intro-text">
+              Sends an <strong className="text-slate-900">in-app notification</strong> and <strong className="text-slate-900">email</strong> to each recipient (bell / Notifications screen).{' '}
+              This is <strong className="text-slate-900">not</strong> SMS, email, or a DM in their support thread — only the notifications list.
             </p>
-            <p className="text-[12px] text-slate-500 leading-relaxed">
-              <strong className="text-slate-600">All</strong>: anyone who has messaged your business or follows you.{' '}
-              <strong className="text-slate-600">Selected</strong>: pick from that same member list.{' '}
-              <strong className="text-slate-600">Labels</strong>: approved customers with at least one conversation tagged with any label you pick.{' '}
-              <strong className="text-slate-600">One user</strong>: username or UUID. Pending or suspended customers are always skipped.
+            <p className="text-[12px] admin-intro-text">
+              <strong className="text-slate-900">All</strong>: anyone who has messaged your business or follows you.{' '}
+              <strong className="text-slate-900">Selected</strong>: pick from that same member list.{' '}
+              <strong className="text-slate-900">Labels</strong>: approved customers with at least one conversation tagged with any label you pick.{' '}
+              <strong className="text-slate-900">One user</strong>: username or UUID. Pending or suspended customers are always skipped.
             </p>
             <div className="rounded-2xl border border-slate-200 bg-white shadow-sm p-3 space-y-3">
               <div className="grid grid-cols-3 gap-2">
@@ -6411,8 +6376,8 @@ export default function DashboardPage() {
                     onClick={() => setAnnouncementType(opt)}
                     className={`rounded-xl py-2.5 border capitalize text-[13px] ${
                       announcementType === opt
-                        ? 'border-[#6f54ff] bg-[#211a47] text-slate-900'
-                        : 'border-slate-200 bg-slate-50 text-slate-500'
+                        ? 'admin-select-active'
+                        : 'admin-select-idle'
                     }`}
                   >
                     {opt}
@@ -6448,8 +6413,8 @@ export default function DashboardPage() {
                             onClick={() => toggleNotifyAudienceLabel(lbl.id)}
                             className={`w-full text-left rounded-lg border px-3 py-2.5 transition-colors flex items-start gap-3 ${
                               selected
-                                ? 'border-[#6f54ff] bg-[#221c4a] text-slate-900'
-                                : 'border-slate-200 bg-slate-50 text-slate-500 hover:border-slate-300'
+                                ? 'admin-select-active'
+                                : 'admin-select-idle'
                             }`}
                           >
                             <SelectionCheckbox checked={selected} />
@@ -6549,8 +6514,8 @@ export default function DashboardPage() {
                                 onClick={() => toggleSelectedRecipient(member.id)}
                                 className={`w-full text-left rounded-lg border px-3 py-2.5 transition-colors flex items-start gap-3 ${
                                   selected
-                                    ? 'border-[#6f54ff] bg-[#221c4a] text-slate-900'
-                                    : 'border-slate-200 bg-slate-50 text-slate-500 hover:border-slate-300'
+                                    ? 'admin-select-active'
+                                    : 'admin-select-idle'
                                 }`}
                               >
                                 <SelectionCheckbox checked={selected} />
@@ -6600,7 +6565,7 @@ export default function DashboardPage() {
                   (audience === 'labels' && notifyAudienceLabelIds.length === 0)
                 }
                 onClick={() => void sendMemberNotifications()}
-                className="w-full rounded-xl py-2.5 font-semibold bg-gradient-to-r from-[#6f54ff] to-[#b8860b] disabled:opacity-40"
+                className="w-full rounded-xl py-2.5 font-semibold admin-btn-gradient"
               >
                 {notifyBusy ? 'Sending...' : 'Send'}
               </button>
@@ -6611,7 +6576,7 @@ export default function DashboardPage() {
         <StaffTabPanel tab="reports" activeTab={activeTab} mountedTabs={mountedTabs} render={() => (
           <section className="space-y-3">
             {reports.length === 0 ? (
-              <p className="text-sm text-slate-500">No reports for this business.</p>
+              <p className="text-sm admin-empty-state">No reports for this business.</p>
             ) : (
               <div className="space-y-2.5">
                 {reports.map((report) => (
@@ -6621,7 +6586,7 @@ export default function DashboardPage() {
                       <StatusPill status={report.status} />
                     </div>
                     <p className="text-sm text-blue-600 mt-2">{report.type}</p>
-                    <p className="text-slate-500 mt-1">{report.details}</p>
+                    <p className="text-slate-700 mt-1">{report.details}</p>
                     <div className="mt-3 flex flex-wrap gap-2">
                       {(['new', 'in_review', 'resolved'] as const).map((nextStatus) => (
                         <button
@@ -6631,8 +6596,8 @@ export default function DashboardPage() {
                           onClick={() => void updateReportStatus(report.id, nextStatus)}
                           className={`rounded-lg border px-2.5 py-1.5 text-xs capitalize transition-colors disabled:opacity-40 ${
                             report.status === nextStatus
-                              ? 'border-[#7e66ff] bg-[#221c4a] text-slate-900'
-                              : 'border-slate-300 text-slate-500 hover:text-slate-900 hover:border-slate-300'
+                              ? 'admin-select-active'
+                              : 'admin-select-idle'
                           }`}
                         >
                           {nextStatus === 'in_review' ? 'In review' : nextStatus}
@@ -6647,18 +6612,19 @@ export default function DashboardPage() {
         )} />
           </div>
         </div>
-        <footer className="admin-footer hidden lg:flex shrink-0">
+        <footer className="admin-footer hidden lg:flex shrink-0 px-4">
           <span>
-            <span className="text-slate-500 font-semibold">{businessInfo?.name || 'Juwa2 Support'}</span> Staff Console
+            <span className="admin-footer-brand">{businessInfo?.name || 'Juwa2 Support'}</span>{' '}
+            <span className="text-[var(--admin-chrome-text-muted)]">Staff Console</span>
           </span>
-          <span>
-            {new Date().getFullYear()} &copy; All rights reserved. <span className="text-slate-400">v{APP_VERSION}</span>
+          <span className="admin-footer-meta">
+            {new Date().getFullYear()} &copy; All rights reserved. <span>v{APP_VERSION}</span>
           </span>
         </footer>
       </main>
 
       <nav
-        className={`juwa2-footer-bar fixed bottom-0 left-0 right-0 lg:hidden border-t border-white/[0.08] bg-[rgba(9,14,32,0.97)] backdrop-blur-md px-1 py-2 pb-[max(0.5rem,env(safe-area-inset-bottom))] grid ${mobileGridClass}`}
+        className={`juwa2-footer-bar admin-mobile-nav fixed bottom-0 left-0 right-0 lg:hidden px-1 py-2 pb-[max(0.5rem,env(safe-area-inset-bottom))] grid ${mobileGridClass}`}
       >
         {navItems.map((item) => {
           const Icon = item.icon
@@ -6668,24 +6634,24 @@ export default function DashboardPage() {
               key={item.id}
               type="button"
               onClick={() => switchTab(item.id)}
-              className={`flex flex-col items-center gap-0.5 py-1.5 min-w-0 relative ${
-                active ? 'text-[#f5d040]' : 'text-[#8892b0]'
+              className={`admin-mobile-nav-item flex flex-col items-center gap-0.5 py-1.5 min-w-0 relative ${
+                active ? 'is-active' : ''
               }`}
             >
               <span className="relative inline-flex">
                 <Icon className="w-[21px] h-[21px] shrink-0" />
                 {item.id === 'inbox-website' && inboxWebsiteUnreadTotal > 0 ? (
-                  <span className="absolute top-1 right-[calc(50%-1.25rem)] min-w-3.5 h-3.5 px-0.5 rounded-full bg-[#ff3b5c] text-white text-[8px] font-bold flex items-center justify-center leading-none tabular-nums border-2 border-[#090e20]">
+                  <span className="absolute top-1 right-[calc(50%-1.25rem)] min-w-3.5 h-3.5 px-0.5 rounded-full bg-[#ff3b5c] text-white text-[8px] font-bold flex items-center justify-center leading-none tabular-nums border-2 border-[#0c1220]">
                     {inboxWebsiteUnreadTotal > 9 ? '9+' : inboxWebsiteUnreadTotal}
                   </span>
                 ) : null}
                 {item.id === 'inbox-app' && inboxAppUnreadTotal > 0 ? (
-                  <span className="absolute top-1 right-[calc(50%-1.25rem)] min-w-3.5 h-3.5 px-0.5 rounded-full bg-[#ff3b5c] text-white text-[8px] font-bold flex items-center justify-center leading-none tabular-nums border-2 border-[#090e20]">
+                  <span className="absolute top-1 right-[calc(50%-1.25rem)] min-w-3.5 h-3.5 px-0.5 rounded-full bg-[#ff3b5c] text-white text-[8px] font-bold flex items-center justify-center leading-none tabular-nums border-2 border-[#0c1220]">
                     {inboxAppUnreadTotal > 9 ? '9+' : inboxAppUnreadTotal}
                   </span>
                 ) : null}
                 {item.id === 'inbox-technical' && inboxTechnicalUnreadTotal > 0 ? (
-                  <span className="absolute top-1 right-[calc(50%-1.25rem)] min-w-3.5 h-3.5 px-0.5 rounded-full bg-[#f97316] text-white text-[8px] font-bold flex items-center justify-center leading-none tabular-nums border-2 border-[#090e20]">
+                  <span className="absolute top-1 right-[calc(50%-1.25rem)] min-w-3.5 h-3.5 px-0.5 rounded-full bg-[#f97316] text-white text-[8px] font-bold flex items-center justify-center leading-none tabular-nums border-2 border-[#0c1220]">
                     {inboxTechnicalUnreadTotal > 9 ? '9+' : inboxTechnicalUnreadTotal}
                   </span>
                 ) : null}
@@ -6764,11 +6730,11 @@ export default function DashboardPage() {
 
 function AccountStatusBadge({ status }: { status: string }) {
   const styles: Record<string, string> = {
-    approved: 'bg-emerald-500/15 text-emerald-300',
-    pending: 'bg-amber-500/15 text-amber-300',
-    suspended: 'bg-red-500/15 text-red-300',
-    blocked: 'bg-white/10 text-[#9ea8cc]',
-    rejected: 'bg-white/10 text-[#9ea8cc]',
+    approved: 'admin-badge-emerald',
+    pending: 'admin-badge-amber',
+    suspended: 'admin-badge-red',
+    blocked: 'bg-slate-100 text-slate-700',
+    rejected: 'bg-slate-100 text-slate-700',
   }
   const label = status || 'unknown'
   return (
@@ -6795,12 +6761,12 @@ function StatCard({
 }) {
   const iconWrap =
     accent === 'yellow'
-      ? 'bg-[rgba(246,179,50,0.1)] text-[#f6b332]'
+      ? 'bg-amber-50 text-amber-700'
       : accent === 'purple'
-        ? 'bg-[rgba(141,99,255,0.1)] text-[#f5d040]'
+        ? 'bg-violet-50 text-violet-700'
         : accent === 'red'
-          ? 'bg-[rgba(255,59,92,0.1)] text-[#ff3b5c]'
-          : 'bg-[rgba(47,209,127,0.1)] text-[#2fd17f]'
+          ? 'bg-red-50 text-red-600'
+          : 'bg-emerald-50 text-emerald-700'
   return (
     <div className="rounded-2xl border border-slate-200 bg-white shadow-sm p-3.5 flex items-center gap-3">
       <div className={`w-9 h-9 rounded-xl flex items-center justify-center shrink-0 [&_svg]:stroke-current ${iconWrap}`}>
@@ -6808,7 +6774,7 @@ function StatCard({
       </div>
       <div className="min-w-0">
         <p className="text-[22px] font-bold leading-none text-slate-900 tabular-nums tracking-tight">{value}</p>
-        <p className="text-[12px] text-slate-500 mt-1 font-medium">{label}</p>
+        <p className="text-[12px] text-slate-700 mt-1 font-medium">{label}</p>
       </div>
     </div>
   )
@@ -6857,22 +6823,22 @@ function SelectionCheckbox({ checked }: { checked: boolean }) {
 
 function AudienceRow({ label, selected, onClick }: { label: string; selected: boolean; onClick: () => void }) {
   return (
-    <button type="button" onClick={onClick} className="w-full px-3 py-2.5 flex items-center justify-between gap-3">
-      <span className="text-left text-sm">{label}</span>
+    <button type="button" onClick={onClick} className="w-full px-3 py-2.5 flex items-center justify-between gap-3 text-slate-800 hover:bg-white/80">
+      <span className="text-left text-sm font-medium">{label}</span>
       <span
         className={`w-5 h-5 rounded-full border-2 shrink-0 flex items-center justify-center ${
-          selected ? 'border-[#a78bfa] bg-[#6f54ff]/40' : 'border-white/25 bg-transparent'
+          selected ? 'border-violet-500 bg-violet-100' : 'border-slate-300 bg-white'
         }`}
       >
-        {selected ? <Check className="w-3 h-3 text-[#ede9fe]" strokeWidth={3} /> : null}
+        {selected ? <Check className="w-3 h-3 text-violet-700" strokeWidth={3} /> : null}
       </span>
     </button>
   )
 }
 
 function StatusPill({ status }: { status: ReportItem['status'] }) {
-  if (status === 'new') return <span className="px-2 py-1 rounded-full text-xs bg-sky-500/20 text-sky-300">New</span>
+  if (status === 'new') return <span className="px-2 py-1 rounded-full text-xs admin-badge-sky">New</span>
   if (status === 'in_review')
-    return <span className="px-2 py-1 rounded-full text-xs bg-amber-500/20 text-amber-300">In Review</span>
-  return <span className="px-2 py-1 rounded-full text-xs bg-emerald-500/20 text-emerald-300">Resolved</span>
+    return <span className="px-2 py-1 rounded-full text-xs admin-badge-amber">In Review</span>
+  return <span className="px-2 py-1 rounded-full text-xs admin-badge-emerald">Resolved</span>
 }
