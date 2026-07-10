@@ -10,6 +10,7 @@ const juwa2Footer = Inter({
   subsets: ['latin'],
   display: 'swap',
   variable: '--font-juwa2-footer',
+  weight: ['400', '500', '600', '700'],
 })
 
 export const metadata: Metadata = {

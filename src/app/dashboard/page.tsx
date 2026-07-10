@@ -3972,8 +3972,8 @@ export default function DashboardPage() {
     selectedEscalation && isActiveEscalation(selectedEscalation.status)
 
   return (
-    <div className={`admin-shell min-h-screen lg:h-screen lg:overflow-hidden text-[14px] leading-snug text-white antialiased bg-[radial-gradient(ellipse_at_top_left,_#0f1840_0%,_#070a18_45%,_#000000_100%)] lg:grid ${sidebarCollapsed ? 'lg:grid-cols-[68px_1fr]' : 'lg:grid-cols-[236px_1fr]'}`}>
-      <aside className="admin-sidebar hidden lg:flex lg:h-full lg:min-h-0 flex-col border-r border-white/[0.08] bg-[rgba(8,13,28,0.95)] overflow-hidden">
+    <div className={`admin-shell min-h-screen lg:h-screen lg:overflow-hidden text-[14px] leading-snug antialiased lg:grid ${sidebarCollapsed ? 'lg:grid-cols-[68px_1fr]' : 'lg:grid-cols-[236px_1fr]'}`}>
+      <aside className="admin-sidebar hidden lg:flex lg:h-full lg:min-h-0 flex-col border-r border-white/[0.08] bg-[rgba(8,13,28,0.95)] overflow-hidden text-white">
         <div className={`flex items-center gap-2.5 h-14 shrink-0 border-b border-white/[0.06] ${sidebarCollapsed ? 'justify-center px-2' : 'px-3'}`}>
           <div className="relative shrink-0">
             <input
@@ -4075,7 +4075,7 @@ export default function DashboardPage() {
       </aside>
 
       <main className="flex flex-col min-h-0 w-full min-h-screen lg:min-h-0 lg:h-full overflow-hidden pb-[max(4.25rem,env(safe-area-inset-bottom))] lg:pb-0">
-        <header className="shrink-0 flex items-center gap-2 h-14 border-b border-white/[0.08] bg-[rgba(11,18,40,0.9)] backdrop-blur-md px-3 sm:px-4">
+        <header className="shrink-0 flex items-center gap-2 h-14 border-b border-white/[0.08] bg-[rgba(11,18,40,0.9)] backdrop-blur-md px-3 sm:px-4 text-white">
           <button
             type="button"
             onClick={() => setSidebarCollapsed((v) => !v)}
@@ -4142,19 +4142,19 @@ export default function DashboardPage() {
         <div
           className={
             isInboxTab(activeTab)
-              ? 'flex-1 min-h-0 overflow-hidden flex flex-col'
-              : 'flex-1 min-h-0 overflow-y-auto'
+              ? 'admin-main-content flex-1 min-h-0 overflow-hidden flex flex-col'
+              : 'admin-main-content flex-1 min-h-0 overflow-y-auto'
           }
         >
           <div
             className={
               isInboxTab(activeTab)
-                ? 'mx-auto w-full max-w-7xl flex-1 min-h-0 flex flex-col space-y-2 px-3 py-2 sm:px-4 sm:py-3'
+                ? 'mx-auto w-full max-w-7xl flex-1 min-h-0 min-w-0 overflow-hidden flex flex-col gap-2 px-3 py-2 sm:px-4 sm:py-3'
                 : 'mx-auto w-full max-w-7xl space-y-3 px-3 py-3 sm:px-4 sm:py-4'
             }
           >
           {loadError ? (
-            <div className="rounded-xl border border-red-500/40 bg-red-500/10 px-3 py-2 text-[13px] text-red-200">
+            <div className="rounded-xl border border-red-200 bg-red-50 px-3 py-2 text-[13px] text-red-700">
               <strong className="font-semibold">Data load issue:</strong> {loadError}
               {/\b(column|relation|does not exist|42703|42P01|suspended|moderation_suspension)\b/i.test(loadError) ? (
                 <p className="text-red-200/80 text-xs mt-1">
@@ -4172,7 +4172,7 @@ export default function DashboardPage() {
           ) : null}
 
           {!businessInfo && profile.business_id ? (
-            <div className="rounded-xl border border-amber-500/40 bg-amber-500/10 px-3 py-2 text-[13px] text-amber-200/90">
+            <div className="rounded-xl border border-amber-200 bg-amber-50 px-3 py-2 text-[13px] text-amber-800">
               Could not load business record — check the businesses table for this business_id.
             </div>
           ) : null}
@@ -4226,15 +4226,15 @@ export default function DashboardPage() {
                   <button
                     type="button"
                     onClick={() => switchTab(staffInboxScope === 'app' ? 'inbox-app' : 'inbox-website')}
-                    className="text-[11px] font-semibold text-[#8892b0] hover:text-[#c4cbe6]"
+                    className="text-[11px] font-semibold text-slate-500 hover:text-slate-600"
                   >
                     View all
                   </button>
                 </div>
               </div>
-              <div className="divide-y divide-white/[0.08]">
+              <div className="divide-y divide-slate-200">
                 {convoList.length === 0 ? (
-                  <p className="px-3 py-5 text-[13px] text-[#8892b0]">No customer threads yet.</p>
+                  <p className="px-3 py-5 text-[13px] text-slate-500">No customer threads yet.</p>
                 ) : (
                   convoList
                     .filter((c) => isAdmin || (staffInboxScope != null && conversationMatchesScope(c.labels, staffInboxScope)))
@@ -4247,9 +4247,9 @@ export default function DashboardPage() {
                         switchTab(resolveInboxTabForConversation(item.id))
                         void openThread(item.id)
                       }}
-                      className="w-full text-left px-3 py-2.5 flex items-start gap-2 hover:bg-white/[0.03] transition-colors"
+                      className="w-full text-left px-3 py-2.5 flex items-start gap-2 hover:bg-slate-50 transition-colors"
                     >
-                      <div className="w-9 h-9 rounded-[10px] bg-[#131e3e] flex items-center justify-center shrink-0 relative overflow-hidden border border-white/[0.06] text-xs font-bold text-white">
+                      <div className="w-9 h-9 rounded-[10px] bg-slate-100 flex items-center justify-center shrink-0 relative overflow-hidden border border-slate-200 text-xs font-bold text-slate-900">
                         {item.customerAvatar ? (
                           <img
                             src={item.customerAvatar}
@@ -4260,15 +4260,15 @@ export default function DashboardPage() {
                           item.customerName.slice(0, 2).toUpperCase()
                         )}
                         {item.unreadCount > 0 ? (
-                          <span className="absolute -top-1 -right-1 min-w-3.5 h-3.5 px-0.5 rounded-full bg-[#ff3b5c] text-white text-[8px] font-bold flex items-center justify-center leading-none tabular-nums border-2 border-[#000000]">
+                          <span className="absolute -top-1 -right-1 min-w-3.5 h-3.5 px-0.5 rounded-full bg-[#ff3b5c] text-slate-900 text-[8px] font-bold flex items-center justify-center leading-none tabular-nums border-2 border-[#000000]">
                             {item.unreadCount > 9 ? '9+' : item.unreadCount}
                           </span>
                         ) : null}
                       </div>
                       <div className="flex-1 min-w-0">
-                        <p className="text-[13px] font-semibold text-white truncate">{item.customerName}</p>
-                        <p className="text-[11px] text-[#8892b0] truncate max-w-[min(100%,240px)]">{item.preview}</p>
-                        <p className="text-[10px] text-[#4e5a7a] mt-0.5">{timeAgo(item.updated_at)}</p>
+                        <p className="text-[13px] font-semibold text-slate-900 truncate">{item.customerName}</p>
+                        <p className="text-[11px] text-slate-500 truncate max-w-[min(100%,240px)]">{item.preview}</p>
+                        <p className="text-[10px] text-slate-400 mt-0.5">{timeAgo(item.updated_at)}</p>
                       </div>
                     </button>
                   ))
@@ -4280,56 +4280,56 @@ export default function DashboardPage() {
 
         <StaffTabPanel tab="post" activeTab={activeTab} mountedTabs={mountedTabs} render={() => (
           <section className="space-y-3 max-w-4xl">
-            <p className="text-[12px] text-[#8892b0] leading-relaxed">
+            <p className="text-[12px] text-slate-500 leading-relaxed">
               Goes to the public feed for all approved customers. They can like and comment. Everyone approved gets an in-app notification when you publish. Email goes only to customers labeled{' '}
-              <strong className="text-[#c4cbe6]">Active player</strong> or <strong className="text-[#c4cbe6]">Account created</strong> on their support thread.
+              <strong className="text-slate-600">Active player</strong> or <strong className="text-slate-600">Account created</strong> on their support thread.
             </p>
 
-            <div className="rounded-2xl border border-white/[0.08] bg-[rgba(11,18,40,0.9)] p-3 space-y-3">
+            <div className="rounded-2xl border border-slate-200 bg-white shadow-sm p-3 space-y-3">
               <input type="file" ref={postFileInputRef} accept="image/*" className="hidden" onChange={onPostImagePick} />
               <div className="flex items-start gap-3">
                 <div className="w-11 h-11 rounded-full bg-gradient-to-br from-[#f5d040] to-[#b8860b] flex items-center justify-center shrink-0 mt-0.5">
-                  <User2 className="w-5 h-5 text-white" />
+                  <User2 className="w-5 h-5 text-slate-900" />
                 </div>
                 <div className="flex-1 min-w-0 space-y-1">
                   <textarea
                     rows={2}
-                    className="w-full bg-[#111a31] border border-white/10 rounded-2xl px-3 py-2.5 text-sm outline-none focus:border-[#6f54ff] text-[#dce3f9] placeholder:text-[#8b97bf] resize-none min-h-[52px] max-h-32"
+                    className="w-full bg-slate-50 border border-slate-200 rounded-2xl px-3 py-2.5 text-sm outline-none focus:border-[#6f54ff] text-slate-700 placeholder:text-slate-400 resize-none min-h-[52px] max-h-32"
                     placeholder="What's on your mind?"
                     value={postTitle}
                     onChange={(e) => setPostTitle(e.target.value)}
                   />
-                  <p className="text-[11px] text-[#7d86a8] px-1">Main line — shows first on the feed (bold).</p>
+                  <p className="text-[11px] text-slate-500 px-1">Main line — shows first on the feed (bold).</p>
                 </div>
               </div>
               <div className="space-y-1">
                 <textarea
                   rows={3}
-                  className="w-full bg-[#111a31] border border-white/10 rounded-2xl px-3 py-2.5 text-sm outline-none focus:border-[#6f54ff] min-h-20 max-h-40 resize-y text-[#dce3f9] placeholder:text-[#8b97bf]"
+                  className="w-full bg-slate-50 border border-slate-200 rounded-2xl px-3 py-2.5 text-sm outline-none focus:border-[#6f54ff] min-h-20 max-h-40 resize-y text-slate-700 placeholder:text-slate-400"
                   placeholder="Add more details (optional)"
                   value={postBody}
                   onChange={(e) => setPostBody(e.target.value)}
                 />
-                <p className="text-[11px] text-[#7d86a8] px-1">Optional — shows below the main line if you add text here.</p>
+                <p className="text-[11px] text-slate-500 px-1">Optional — shows below the main line if you add text here.</p>
               </div>
               {postImage ? (
-                <div className="relative flex items-center justify-center overflow-hidden rounded-xl border border-white/10 bg-black/20 max-h-56">
+                <div className="relative flex items-center justify-center overflow-hidden rounded-xl border border-slate-200 bg-black/20 max-h-56">
                   <img src={postImage.previewUrl} alt="" className="mx-auto block h-auto w-auto max-w-full max-h-56 object-contain" />
                   <button
                     type="button"
                     onClick={clearPostImage}
-                    className="absolute top-2 right-2 p-1.5 rounded-full bg-black/60 text-white hover:bg-black/80"
+                    className="absolute top-2 right-2 p-1.5 rounded-full bg-black/60 text-slate-900 hover:bg-black/80"
                     aria-label="Remove image"
                   >
                     <X className="w-4 h-4" />
                   </button>
                 </div>
               ) : null}
-              <div className="rounded-2xl border border-white/10 bg-[#111a31] px-3 py-2.5">
+              <div className="rounded-2xl border border-slate-200 bg-slate-50 px-3 py-2.5">
                 <button
                   type="button"
                   onClick={() => postFileInputRef.current?.click()}
-                  className="w-full flex items-center justify-center gap-2 rounded-xl py-2.5 text-sm font-semibold text-[#aeb7d6] hover:text-white hover:bg-white/5 transition-colors"
+                  className="w-full flex items-center justify-center gap-2 rounded-xl py-2.5 text-sm font-semibold text-slate-500 hover:text-slate-900 hover:bg-slate-100 transition-colors"
                 >
                   <ImagePlus className="w-4 h-4 text-[#f5d040]" />
                   Photo
@@ -4347,15 +4347,15 @@ export default function DashboardPage() {
 
             <div>
               <div className="flex items-center justify-between gap-2 mb-3">
-                <h4 className="text-lg font-semibold text-white">Your posts</h4>
+                <h4 className="text-lg font-semibold text-slate-900">Your posts</h4>
                 {myAnnouncementsLoading ? (
                   <Loader2 className="w-4 h-4 animate-spin text-[#f5d040]" />
                 ) : (
-                  <span className="text-xs text-[#7d86a8]">{myAnnouncements.length} shown</span>
+                  <span className="text-xs text-slate-500">{myAnnouncements.length} shown</span>
                 )}
               </div>
               {myAnnouncements.length === 0 && !myAnnouncementsLoading ? (
-                <p className="text-sm text-[#7d86a8] rounded-2xl border border-white/10 bg-[#0d1428]/60 px-4 py-6 text-center">
+                <p className="text-sm text-slate-500 rounded-2xl border border-slate-200 bg-slate-50 px-4 py-6 text-center">
                   No announcements yet. Publish above — they will stack here like a timeline.
                 </p>
               ) : (
@@ -4372,11 +4372,11 @@ export default function DashboardPage() {
                     return (
                       <li
                         key={a.id}
-                        className="rounded-2xl border border-white/10 bg-[#0d1428]/90 overflow-hidden shadow-[0_16px_40px_-28px_rgba(30,49,112,0.95)]"
+                        className="rounded-2xl border border-slate-200 bg-slate-50 overflow-hidden shadow-sm"
                       >
                         <div className="p-3">
                           <div className="flex items-start justify-between gap-2 mb-2">
-                            <div className="flex flex-wrap items-center gap-2 text-xs text-[#7d86a8] min-w-0">
+                            <div className="flex flex-wrap items-center gap-2 text-xs text-slate-500 min-w-0">
                               <span>{timeAgo(a.created_at)}</span>
                               {a.hidden_at ? (
                                 <span className="rounded-md border border-amber-500/30 bg-amber-500/10 px-1.5 py-0.5 text-[10px] font-semibold uppercase tracking-wide text-amber-200">
@@ -4395,13 +4395,13 @@ export default function DashboardPage() {
                           {editingPostId === a.id ? (
                             <div className="space-y-2">
                               <input
-                                className="w-full rounded-xl border border-white/10 bg-[#111a31] px-3 py-2 text-sm text-white outline-none focus:border-[#6f54ff]"
+                                className="w-full rounded-xl border border-slate-200 bg-slate-50 px-3 py-2 text-sm text-slate-900 outline-none focus:border-[#6f54ff]"
                                 value={editPostTitle}
                                 onChange={(e) => setEditPostTitle(e.target.value)}
                                 placeholder="Title"
                               />
                               <textarea
-                                className="w-full min-h-20 rounded-xl border border-white/10 bg-[#111a31] px-3 py-2 text-sm text-white outline-none focus:border-[#6f54ff]"
+                                className="w-full min-h-20 rounded-xl border border-slate-200 bg-slate-50 px-3 py-2 text-sm text-slate-900 outline-none focus:border-[#6f54ff]"
                                 value={editPostBody}
                                 onChange={(e) => setEditPostBody(e.target.value)}
                                 placeholder="Body"
@@ -4418,7 +4418,7 @@ export default function DashboardPage() {
                                 <button
                                   type="button"
                                   onClick={() => setEditingPostId(null)}
-                                  className="rounded-lg border border-white/10 px-3 py-2 text-xs font-medium text-[#c4cbe6] hover:bg-white/[0.06]"
+                                  className="rounded-lg border border-slate-200 px-3 py-2 text-xs font-medium text-slate-600 hover:bg-slate-100"
                                 >
                                   Cancel
                                 </button>
@@ -4427,10 +4427,10 @@ export default function DashboardPage() {
                           ) : (
                             <>
                               {a.title.trim() ? (
-                                <p className="font-semibold text-white whitespace-pre-wrap">{a.title}</p>
+                                <p className="font-semibold text-slate-900 whitespace-pre-wrap">{a.title}</p>
                               ) : null}
                               {a.body.trim() ? (
-                                <p className={`text-sm text-[#c4cbe6] whitespace-pre-wrap line-clamp-6 ${a.title.trim() ? 'mt-1' : ''}`}>
+                                <p className={`text-sm text-slate-600 whitespace-pre-wrap line-clamp-6 ${a.title.trim() ? 'mt-1' : ''}`}>
                                   {a.body}
                                 </p>
                               ) : null}
@@ -4442,7 +4442,7 @@ export default function DashboardPage() {
                             <FeedPostImage imageUrl={a.image_url} alt="" rounded="xl" />
                           </div>
                         ) : null}
-                        <div className="flex flex-wrap items-center gap-4 px-4 py-3 border-t border-white/10 text-sm">
+                        <div className="flex flex-wrap items-center gap-4 px-4 py-3 border-t border-slate-200 text-sm">
                           <button
                             type="button"
                             disabled={meta.likes === 0}
@@ -4451,7 +4451,7 @@ export default function DashboardPage() {
                                 prev?.postId === a.id && prev.mode === 'likes' ? null : { postId: a.id, mode: 'likes' }
                               )
                             }
-                            className="inline-flex items-center gap-1.5 rounded-lg px-1.5 py-0.5 -mx-1.5 text-[#c4cbe6] hover:text-white hover:bg-white/[0.06] transition-colors disabled:opacity-40 disabled:cursor-not-allowed disabled:hover:bg-transparent"
+                            className="inline-flex items-center gap-1.5 rounded-lg px-1.5 py-0.5 -mx-1.5 text-slate-600 hover:text-slate-900 hover:bg-slate-100 transition-colors disabled:opacity-40 disabled:cursor-not-allowed disabled:hover:bg-transparent"
                           >
                             <ThumbsUp className="w-4 h-4 text-[#f5d040]" />
                             {meta.likes} likes
@@ -4476,7 +4476,7 @@ export default function DashboardPage() {
                             className={`inline-flex items-center gap-1.5 rounded-lg px-1.5 py-0.5 -mx-1.5 cursor-pointer transition-colors ${
                               engagementOpen?.postId === a.id && engagementOpen.mode === 'comments'
                                 ? 'text-white bg-[#f5d040]/15'
-                                : 'text-[#c4cbe6] hover:text-white hover:bg-white/[0.06]'
+                                : 'text-slate-600 hover:text-slate-900 hover:bg-slate-100'
                             }`}
                           >
                             <ChatBubbleIcon className="text-[#f5d040]" size={16} strokeWidth={2} />
@@ -4485,41 +4485,41 @@ export default function DashboardPage() {
                           <button
                             type="button"
                             onClick={() => void shareStaffAnnouncement(a)}
-                            className="inline-flex items-center gap-1.5 rounded-lg px-1.5 py-0.5 -mx-1.5 text-[#c4cbe6] hover:text-white hover:bg-white/[0.06] transition-colors ml-auto"
+                            className="inline-flex items-center gap-1.5 rounded-lg px-1.5 py-0.5 -mx-1.5 text-slate-600 hover:text-slate-900 hover:bg-slate-100 transition-colors ml-auto"
                           >
                             <Share2 className="w-4 h-4 text-[#f5d040]" />
                             Share link
                           </button>
                         </div>
                         {engagementOpen?.postId === a.id ? (
-                          <div className="px-4 pb-4 border-t border-white/10">
+                          <div className="px-4 pb-4 border-t border-slate-200">
                             <div className="pt-3">
                               {engagementOpen.mode === 'likes' ? (
                                 <>
-                                  <p className="text-sm font-semibold text-white mb-2">People who liked this post</p>
+                                  <p className="text-sm font-semibold text-slate-900 mb-2">People who liked this post</p>
                                   {meta.likedBy.length === 0 ? (
-                                    <p className="text-sm text-[#7d86a8]">No likes yet.</p>
+                                    <p className="text-sm text-slate-500">No likes yet.</p>
                                   ) : (
                                     <ul className="space-y-2">
                                       {meta.likedBy.map((u, idx) => (
-                                        <li key={`${u.name}-${idx}`} className="flex items-center gap-3 rounded-xl border border-white/10 bg-[#131d3d] px-3 py-2.5">
+                                        <li key={`${u.name}-${idx}`} className="flex items-center gap-3 rounded-xl border border-slate-200 bg-slate-50 px-3 py-2.5">
                                           {u.avatar ? (
-                                            <img src={u.avatar} alt={`${u.name} avatar`} className="w-9 h-9 rounded-full object-cover border border-white/10" />
+                                            <img src={u.avatar} alt={`${u.name} avatar`} className="w-9 h-9 rounded-full object-cover border border-slate-200" />
                                           ) : (
-                                            <div className="w-9 h-9 rounded-full bg-[#202b51] text-[11px] font-bold text-[#d8def3] border border-white/10 flex items-center justify-center">
+                                            <div className="w-9 h-9 rounded-full bg-[#202b51] text-[11px] font-bold text-[#d8def3] border border-slate-200 flex items-center justify-center">
                                               {u.name.slice(0, 2).toUpperCase()}
                                             </div>
                                           )}
-                                          <p className="text-sm text-white font-medium">{u.name}</p>
+                                          <p className="text-sm text-slate-900 font-medium">{u.name}</p>
                                         </li>
                                       ))}
                                     </ul>
                                   )}
                                 </>
                               ) : (
-                                <div className="bg-[#091028] border border-white/10 rounded-2xl px-3 py-3 space-y-3">
+                                <div className="bg-slate-50 border border-slate-200 rounded-2xl px-3 py-3 space-y-3">
                                   {meta.commentDetails.length === 0 ? (
-                                    <p className="text-sm text-[#7d86a8] text-center py-2">No comments yet.</p>
+                                    <p className="text-sm text-slate-500 text-center py-2">No comments yet.</p>
                                   ) : (
                                     (() => {
                                       const cBy = engagementCommentsByParent(meta.commentDetails)
@@ -4534,22 +4534,22 @@ export default function DashboardPage() {
                                               <img
                                                 src={c.userAvatar}
                                                 alt={`${c.userName} avatar`}
-                                                className="w-8 h-8 rounded-full object-cover border border-white/10 shrink-0"
+                                                className="w-8 h-8 rounded-full object-cover border border-slate-200 shrink-0"
                                               />
                                             ) : (
-                                              <div className="w-8 h-8 rounded-full bg-[#606770] text-xs font-bold text-white border border-white/10 flex items-center justify-center shrink-0">
+                                              <div className="w-8 h-8 rounded-full bg-[#606770] text-xs font-bold text-slate-900 border border-slate-200 flex items-center justify-center shrink-0">
                                                 {c.userName.slice(0, 2).toUpperCase()}
                                               </div>
                                             )}
                                             <div className="min-w-0 flex-1">
                                               <div
-                                                className={`max-w-full rounded-2xl px-3 py-2 border bg-[#131d3d] border-white/10 ${
+                                                className={`max-w-full rounded-2xl px-3 py-2 border bg-slate-50 border-slate-200 ${
                                                   c.hidden_at ? 'opacity-70' : ''
                                                 }`}
                                               >
                                                 <div className="flex items-start justify-between gap-2">
                                                   <div className="min-w-0">
-                                                    <span className="font-semibold text-white">{c.userName}</span>
+                                                    <span className="font-semibold text-slate-900">{c.userName}</span>
                                                     {c.hidden_at ? (
                                                       <span className="ml-2 text-[10px] font-semibold uppercase text-amber-200">
                                                         Hidden
@@ -4568,7 +4568,7 @@ export default function DashboardPage() {
                                                 {editingCommentId === c.id ? (
                                                   <div className="mt-2 space-y-2">
                                                     <textarea
-                                                      className="w-full min-h-16 rounded-xl border border-white/10 bg-[#111a31] px-2.5 py-2 text-sm text-white outline-none focus:border-[#6f54ff]"
+                                                      className="w-full min-h-16 rounded-xl border border-slate-200 bg-slate-50 px-2.5 py-2 text-sm text-slate-900 outline-none focus:border-[#6f54ff]"
                                                       value={editCommentBody}
                                                       onChange={(e) => setEditCommentBody(e.target.value)}
                                                     />
@@ -4584,7 +4584,7 @@ export default function DashboardPage() {
                                                       <button
                                                         type="button"
                                                         onClick={() => setEditingCommentId(null)}
-                                                        className="rounded-lg border border-white/10 px-2.5 py-1.5 text-xs font-medium text-[#c4cbe6]"
+                                                        className="rounded-lg border border-slate-200 px-2.5 py-1.5 text-xs font-medium text-slate-600"
                                                       >
                                                         Cancel
                                                       </button>
@@ -4595,7 +4595,7 @@ export default function DashboardPage() {
                                                 )}
                                               </div>
                                               <div className="mt-1 ml-1 flex flex-wrap items-center gap-2">
-                                                <p className="text-[11px] text-[#7d86a8]">{timeAgo(c.created_at)}</p>
+                                                <p className="text-[11px] text-slate-500">{timeAgo(c.created_at)}</p>
                                                 <button
                                                   type="button"
                                                   onClick={() => {
@@ -4617,18 +4617,18 @@ export default function DashboardPage() {
                                                     <img
                                                       src={profile.avatar_url}
                                                       alt="Your avatar"
-                                                      className="w-8 h-8 rounded-full object-cover border border-white/10 shrink-0"
+                                                      className="w-8 h-8 rounded-full object-cover border border-slate-200 shrink-0"
                                                     />
                                                   ) : (
-                                                    <div className="w-8 h-8 rounded-full bg-[#f5d040] text-xs font-bold text-white flex items-center justify-center shrink-0">
+                                                    <div className="w-8 h-8 rounded-full bg-[#f5d040] text-xs font-bold text-slate-900 flex items-center justify-center shrink-0">
                                                       {(profile?.username || 'JB').slice(0, 2).toUpperCase()}
                                                     </div>
                                                   )}
-                                                  <div className="flex flex-1 min-w-0 gap-2 items-end rounded-2xl px-3 py-1.5 border bg-[#0f1a38] border-white/10">
+                                                  <div className="flex flex-1 min-w-0 gap-2 items-end rounded-2xl px-3 py-1.5 border bg-slate-50 border-slate-200">
                                                     <textarea
                                                       rows={1}
                                                       autoFocus
-                                                      className="flex-1 min-w-0 bg-transparent text-sm py-2 text-white placeholder:text-[#8e99bd] focus:outline-none resize-none min-h-[40px] max-h-28"
+                                                      className="flex-1 min-w-0 bg-transparent text-sm py-2 text-slate-900 placeholder:text-slate-400 focus:outline-none resize-none min-h-[40px] max-h-28"
                                                       placeholder={`Reply to ${c.userName}...`}
                                                       value={staffReplyThreadDraft}
                                                       onChange={(e) => setStaffReplyThreadDraft(e.target.value)}
@@ -4657,7 +4657,7 @@ export default function DashboardPage() {
                                                 </div>
                                               ) : null}
                                               {kids.length > 0 ? (
-                                                <ul className="mt-2 space-y-2 border-l border-white/10 pl-2 ml-1">
+                                                <ul className="mt-2 space-y-2 border-l border-slate-200 pl-2 ml-1">
                                                   {kids.map((k) => renderEngagementComment(k))}
                                                 </ul>
                                               ) : null}
@@ -4677,18 +4677,18 @@ export default function DashboardPage() {
                                       <img
                                         src={profile.avatar_url}
                                         alt="Your avatar"
-                                        className="w-8 h-8 rounded-full object-cover border border-white/10 shrink-0"
+                                        className="w-8 h-8 rounded-full object-cover border border-slate-200 shrink-0"
                                       />
                                     ) : (
-                                      <div className="w-8 h-8 rounded-full bg-[#f5d040] text-xs font-bold text-white flex items-center justify-center shrink-0">
+                                      <div className="w-8 h-8 rounded-full bg-[#f5d040] text-xs font-bold text-slate-900 flex items-center justify-center shrink-0">
                                         {(profile?.username || 'JB').slice(0, 2).toUpperCase()}
                                       </div>
                                     )}
-                                    <div className="flex flex-1 min-w-0 gap-2 items-end rounded-2xl px-3 py-1.5 border bg-[#0f1a38] border-white/10">
+                                    <div className="flex flex-1 min-w-0 gap-2 items-end rounded-2xl px-3 py-1.5 border bg-slate-50 border-slate-200">
                                       <textarea
                                         id={`staff-comment-${a.id}`}
                                         rows={1}
-                                        className="flex-1 min-w-0 bg-transparent text-sm py-2 text-white placeholder:text-[#8e99bd] focus:outline-none resize-none min-h-[40px] max-h-28"
+                                        className="flex-1 min-w-0 bg-transparent text-sm py-2 text-slate-900 placeholder:text-slate-400 focus:outline-none resize-none min-h-[40px] max-h-28"
                                         placeholder="Write a comment..."
                                         value={staffCommentDrafts[a.id] || ''}
                                         onChange={(e) =>
@@ -4736,23 +4736,24 @@ export default function DashboardPage() {
           activeTab={activeTab}
           mountedTabs={mountedTabs}
           isVisible={(tab) => isInboxTab(tab as AppTab)}
+          className="flex flex-col flex-1 min-h-0 min-w-0 overflow-hidden gap-2"
           render={() => (
-          <section className="flex flex-col flex-1 min-h-0 space-y-2">
-            <DesktopNotificationPrompt variant="staff" />
+          <>
+            <DesktopNotificationPrompt variant="staff" isLight />
             {!isAdmin && profile.business_role === 'support' && staffInboxScope ? (
-              <p className="text-[11px] text-[#8892b0] shrink-0 rounded-xl border border-white/[0.08] bg-white/[0.03] px-3 py-2">
-                Your assignment: <strong className="text-[#c4cbe6]">{supportScopeLabel(staffInboxScope)}</strong>. You only see
+              <p className="text-[11px] text-slate-500 shrink-0 rounded-xl border border-slate-200 bg-slate-50 px-3 py-2">
+                Your assignment: <strong className="text-slate-600">{supportScopeLabel(staffInboxScope)}</strong>. You only see
                 customer threads in your assigned inbox{staffInboxScope === 'both' ? 'es' : ''}.
               </p>
             ) : null}
             {profile.business_role === 'technical' ? (
-              <p className="text-[11px] text-[#8892b0] shrink-0 rounded-xl border border-orange-500/20 bg-orange-500/5 px-3 py-2">
+              <p className="text-[11px] text-slate-500 shrink-0 rounded-xl border border-orange-500/20 bg-orange-500/5 px-3 py-2">
                 Escalated threads from support appear here with full chat history. <strong className="text-[#fdba74]">Claim</strong> a thread to take over the same customer chat.
               </p>
             ) : null}
             <div className="flex items-center justify-between gap-2 flex-wrap shrink-0">
               <div className="flex items-center gap-2 min-h-[34px]">
-                <h3 className="text-[13px] font-bold text-white">{inboxChannelTitle(activeTab)}</h3>
+                <h3 className="text-base font-bold tracking-tight text-slate-900">{inboxChannelTitle(activeTab)}</h3>
                 {(activeTab === 'inbox-website'
                   ? inboxWebsiteUnreadTotal
                   : activeTab === 'inbox-app'
@@ -4767,7 +4768,7 @@ export default function DashboardPage() {
                     new
                   </span>
                 ) : null}
-                <span className="text-[11px] text-[#8892b0] tabular-nums">
+                <span className="text-[12px] text-slate-500 tabular-nums font-medium">
                   {inboxSearchQuery.trim() || inboxThreadLabelFilterIds.length > 0
                     ? `${inboxDisplayList.length} of ${channelFilteredConvoList.length} threads`
                     : `${channelFilteredConvoList.length} threads`}
@@ -4781,7 +4782,7 @@ export default function DashboardPage() {
                   type="button"
                   onClick={() => void refreshInbox()}
                   disabled={inboxRefreshing || !profile.business_id}
-                  className="inline-flex items-center gap-2 rounded-[10px] border border-white/[0.08] bg-white/[0.04] px-3 py-2 text-[13px] font-semibold text-[#c4cbe6] hover:text-white hover:bg-white/[0.06] disabled:opacity-40"
+                  className="inline-flex items-center gap-2 rounded-[10px] border border-slate-200 bg-slate-50 px-3 py-2 text-[13px] font-semibold text-slate-600 hover:text-slate-900 hover:bg-slate-100 disabled:opacity-40"
                 >
                   <RefreshCw className={`w-4 h-4 ${inboxRefreshing ? 'animate-spin' : ''}`} />
                   Refresh inbox
@@ -4790,7 +4791,7 @@ export default function DashboardPage() {
             </div>
 
             {inboxLoading ? (
-              <div className="flex items-center justify-center py-12 text-[#8892b0]">
+              <div className="flex items-center justify-center py-12 text-slate-500">
                 <Loader2 className="w-6 h-6 animate-spin text-[#f5d040] mr-2" />
                 Loading inbox…
               </div>
@@ -4801,39 +4802,39 @@ export default function DashboardPage() {
                   <code className="text-red-200">profiles.business_id</code> matching conversations for this business.
                 </p>
               ) : (
-                <div className="text-sm text-[#7d86a8] space-y-2">
+                <div className="text-sm text-slate-500 space-y-2">
                   <p>
-                    When approved customers message your business from the feed, threads show here. Open <strong className="text-[#c4cbe6]">Support</strong>{' '}
-                    in the customer feed to create a row in <code className="text-[#9ea8cc] text-xs">conversations</code> for this business.
+                    When approved customers message your business from the feed, threads show here. Open <strong className="text-slate-600">Support</strong>{' '}
+                    in the customer feed to create a row in <code className="text-slate-500 text-xs">conversations</code> for this business.
                   </p>
-                  <p className="text-[13px] text-[#8892b0]">
-                    This list only includes threads where <code className="text-[#9ea8cc] text-xs">business_id</code> matches{' '}
-                    <strong className="text-[#c4cbe6]">{businessInfo?.name ?? 'your business'}</strong>
+                  <p className="text-[13px] text-slate-500">
+                    This list only includes threads where <code className="text-slate-500 text-xs">business_id</code> matches{' '}
+                    <strong className="text-slate-600">{businessInfo?.name ?? 'your business'}</strong>
                     {businessInfo?.slug ? (
                       <>
                         {' '}
-                        (<code className="text-[#9ea8cc] text-xs">slug: {businessInfo.slug}</code>
+                        (<code className="text-slate-500 text-xs">slug: {businessInfo.slug}</code>
                         ).
                       </>
                     ) : (
                       '.'
                     )}{' '}
-                    On the feed, if <code className="text-[#9ea8cc] text-xs">NEXT_PUBLIC_PRIMARY_SUPPORT_BUSINESS_SLUG</code> is set to your slug, new chats
+                    On the feed, if <code className="text-slate-500 text-xs">NEXT_PUBLIC_PRIMARY_SUPPORT_BUSINESS_SLUG</code> is set to your slug, new chats
                     attach to this business even when the customer follows someone else. Set it to{' '}
-                    <code className="text-[#9ea8cc] text-xs">{businessInfo?.slug ?? 'your-slug'}</code>, restart <code className="text-[#9ea8cc] text-xs">npm run dev</code> or
+                    <code className="text-slate-500 text-xs">{businessInfo?.slug ?? 'your-slug'}</code>, restart <code className="text-slate-500 text-xs">npm run dev</code> or
                     redeploy. Older threads created under another business stay on that business&apos;s inbox only.
                   </p>
                 </div>
               )
             ) : (
-              <div className="rounded-2xl border border-white/[0.08] bg-[rgba(11,18,40,0.9)] overflow-hidden flex flex-col flex-1 min-h-[min(72dvh,640px)] lg:grid lg:grid-cols-[minmax(220px,1fr)_minmax(0,1.75fr)] lg:min-h-0 lg:h-full">
-                <aside className="border-r border-white/[0.08] flex flex-col min-h-0 max-h-[44vh] lg:max-h-none lg:h-full">
-                  <div className="p-2.5 border-b border-white/[0.08] shrink-0">
-                    <div className="relative rounded-xl border border-white/[0.08] bg-[#0f1834]">
-                      <Search className="pointer-events-none absolute left-2.5 top-1/2 h-4 w-4 -translate-y-1/2 text-[#5c647e]" aria-hidden />
+              <div className="admin-inbox-panel rounded-2xl border border-slate-200 bg-white shadow-sm overflow-hidden flex flex-col flex-1 min-h-0 lg:grid lg:grid-cols-[minmax(220px,1fr)_minmax(0,1.75fr)] lg:h-full">
+                <aside className="border-r border-slate-200 flex flex-col min-h-0 overflow-hidden max-h-[38vh] lg:max-h-none lg:h-full">
+                  <div className="p-2.5 border-b border-slate-200 shrink-0">
+                    <div className="relative rounded-xl border border-slate-200 bg-slate-50">
+                      <Search className="pointer-events-none absolute left-2.5 top-1/2 h-4 w-4 -translate-y-1/2 text-slate-400" aria-hidden />
                       <input
                         type="search"
-                        className="w-full rounded-xl bg-transparent py-2 pl-8 pr-2 text-[13px] text-[#e2e6f5] placeholder:text-[#5c647e] outline-none focus:ring-1 focus:ring-[#6f54ff]/40"
+                        className="w-full rounded-xl bg-transparent py-2 pl-8 pr-2 text-[13px] text-slate-800 placeholder:text-slate-400 outline-none focus:ring-1 focus:ring-[#6f54ff]/40"
                         placeholder="Name, @user, preview, label... (finds older threads too)"
                         value={inboxSearchQuery}
                         onChange={(e) => setInboxSearchQuery(e.target.value)}
@@ -4841,14 +4842,14 @@ export default function DashboardPage() {
                       />
                     </div>
                     <div className="mt-2 flex flex-wrap gap-1.5 items-center">
-                        <span className="text-[10px] text-[#5c647e] w-full">Filter by label</span>
+                        <span className="text-[10px] text-slate-400 w-full">Filter by label</span>
                         <button
                           type="button"
                           onClick={() => setInboxThreadLabelFilterIds([])}
                           className={`inline-flex rounded-md border px-1.5 py-0.5 text-[10px] font-semibold transition ${
                             inboxThreadLabelFilterIds.length === 0
                               ? 'border-[#f5d040]/50 bg-[rgba(141,99,255,0.15)] text-[#c4b8ff] ring-1 ring-[#f5d040]/50'
-                              : 'border-white/[0.12] bg-white/[0.04] text-[#9ea8cc] opacity-90 hover:opacity-100 hover:text-white'
+                              : 'border-white/[0.12] bg-slate-50 text-slate-500 opacity-90 hover:opacity-100 hover:text-slate-900'
                           }`}
                         >
                           All in channel
@@ -4883,14 +4884,14 @@ export default function DashboardPage() {
                         })}
                       </div>
                   </div>
-                  <div className="flex-1 min-h-0 overflow-y-auto divide-y divide-white/[0.08] max-h-[44vh] lg:max-h-none">
+                  <div className="flex-1 min-h-0 overflow-y-auto overscroll-y-contain divide-y divide-slate-200">
                     {inboxShowsRecentCap && !inboxSearchQuery.trim() && inboxThreadLabelFilterIds.length === 0 ? (
-                      <p className="px-3 py-2 text-[11px] text-[#8892b0] border-b border-white/[0.06]">
+                      <p className="px-3 py-2 text-[11px] text-slate-500 border-b border-slate-200">
                         Showing the {INBOX_THREAD_LIMIT} most recently active threads. Chats do not expire — search by
                         name to find older conversations (e.g. Bayern).
                       </p>
                     ) : inboxThreadLabelFilterIds.length > 0 ? (
-                      <p className="px-3 py-2 text-[11px] text-[#8892b0] border-b border-white/[0.06]">
+                      <p className="px-3 py-2 text-[11px] text-slate-500 border-b border-slate-200">
                         {inboxDisplayList.length === 0
                           ? 'No labeled threads in the recent load.'
                           : `${inboxDisplayList.length} thread${inboxDisplayList.length === 1 ? '' : 's'} with this label in the recent load.`}{' '}
@@ -4906,11 +4907,11 @@ export default function DashboardPage() {
                       </p>
                     ) : null}
                     {inboxSearchExtraBusy && inboxSearchQuery.trim().length >= 2 ? (
-                      <p className="px-3 py-2 text-[11px] text-[#8892b0]">Searching older threads...</p>
+                      <p className="px-3 py-2 text-[11px] text-slate-500">Searching older threads...</p>
                     ) : null}
                     {inboxDisplayList.length === 0 ? (
                       <div className="px-3 py-4 space-y-3">
-                        <p className="text-center text-[13px] text-[#7d86a8]">
+                        <p className="text-center text-[13px] text-slate-500">
                           {convoListMerged.length === 0
                             ? 'No threads.'
                             : inboxSearchQuery.trim() || inboxThreadLabelFilterIds.length > 0
@@ -4921,7 +4922,7 @@ export default function DashboardPage() {
                         </p>
                         {inboxSearchMemberMatches.length > 0 ? (
                           <div className="rounded-xl border border-[#6f54ff]/30 bg-[#6f54ff]/8 p-2 space-y-1">
-                            <p className="text-[10px] uppercase tracking-wide text-[#9ea8cc] px-1">
+                            <p className="text-[10px] uppercase tracking-wide text-slate-500 px-1">
                               Matching members (no message thread yet)
                             </p>
                             {inboxSearchMemberMatches.map((m) => {
@@ -4931,11 +4932,11 @@ export default function DashboardPage() {
                               return (
                                 <div
                                   key={m.id}
-                                  className="flex items-center justify-between gap-2 rounded-lg px-2 py-1.5 hover:bg-white/[0.04]"
+                                  className="flex items-center justify-between gap-2 rounded-lg px-2 py-1.5 hover:bg-slate-50"
                                 >
                                   <div className="min-w-0">
-                                    <p className="text-[13px] font-semibold text-white truncate">{label}</p>
-                                    <p className="text-[11px] text-[#8892b0] truncate">@{m.username}</p>
+                                    <p className="text-[13px] font-semibold text-slate-900 truncate">{label}</p>
+                                    <p className="text-[11px] text-slate-500 truncate">@{m.username}</p>
                                   </div>
                                   <button
                                     type="button"
@@ -4961,10 +4962,10 @@ export default function DashboardPage() {
                           key={item.id}
                           onClick={() => void openThread(item.id)}
                           className={`w-full text-left px-3 py-2.5 flex gap-2 items-start transition-colors ${
-                            active ? 'bg-[rgba(141,99,255,0.07)]' : 'hover:bg-white/[0.03]'
+                            active ? 'bg-[rgba(141,99,255,0.07)]' : 'hover:bg-slate-50'
                           }`}
                         >
-                          <div className="w-9 h-9 rounded-[10px] bg-[#131e3e] flex items-center justify-center text-[12px] font-bold shrink-0 relative overflow-hidden border border-white/[0.06] text-white">
+                          <div className="w-9 h-9 rounded-[10px] bg-slate-100 flex items-center justify-center text-[12px] font-bold shrink-0 relative overflow-hidden border border-slate-200 text-slate-900">
                             {item.customerAvatar ? (
                               <img src={item.customerAvatar} alt={`${item.customerName} avatar`} className="w-full h-full object-cover" />
                             ) : (
@@ -4973,18 +4974,18 @@ export default function DashboardPage() {
                           </div>
                           <div className="min-w-0 flex-1">
                             <div className="flex items-center justify-between gap-2">
-                              <p className="text-[13px] font-semibold text-white truncate">{item.customerName}</p>
+                              <p className="text-[13px] font-semibold text-slate-900 truncate">{item.customerName}</p>
                               <div className="shrink-0 text-right">
-                                <p className="text-[10px] text-[#4e5a7a]">{timeAgo(item.updated_at)}</p>
+                                <p className="text-[10px] text-slate-400">{timeAgo(item.updated_at)}</p>
                                 {item.unreadCount > 0 ? (
-                                  <span className="inline-flex mt-0.5 min-w-3.5 h-3.5 px-0.5 rounded-full bg-[#ff3b5c] text-white text-[8px] font-bold items-center justify-center tabular-nums border-2 border-[#000000]">
+                                  <span className="inline-flex mt-0.5 min-w-3.5 h-3.5 px-0.5 rounded-full bg-[#ff3b5c] text-slate-900 text-[8px] font-bold items-center justify-center tabular-nums border-2 border-[#000000]">
                                     {item.unreadCount > 9 ? '9+' : item.unreadCount}
                                   </span>
                                 ) : null}
                               </div>
                             </div>
-                            <p className="text-[11px] text-[#8892b0] truncate">@{item.customerUsername}</p>
-                            <p className="text-[11px] text-[#8892b0] truncate mt-0.5 max-w-[min(100%,220px)]">{item.preview}</p>
+                            <p className="text-[11px] text-slate-500 truncate">@{item.customerUsername}</p>
+                            <p className="text-[11px] text-slate-500 truncate mt-0.5 max-w-[min(100%,220px)]">{item.preview}</p>
                             {displayLabels.length > 0 ? (
                               <div className="flex flex-wrap gap-1 mt-1.5 max-w-[min(100%,220px)]">
                                 {displayLabels.slice(0, 4).map((l) => (
@@ -4997,7 +4998,7 @@ export default function DashboardPage() {
                                   </span>
                                 ))}
                                 {displayLabels.length > 4 ? (
-                                  <span className="text-[9px] text-[#5c647e] font-medium">+{displayLabels.length - 4}</span>
+                                  <span className="text-[9px] text-slate-400 font-medium">+{displayLabels.length - 4}</span>
                                 ) : null}
                               </div>
                             ) : null}
@@ -5009,13 +5010,14 @@ export default function DashboardPage() {
                   </div>
                 </aside>
 
-                <div className="flex flex-col relative flex-1 min-h-[200px] max-h-[52vh] lg:max-h-none lg:h-full lg:min-h-0">
+                <div className="admin-inbox-chat relative min-h-0 h-full overflow-hidden">
                   {selectedConvo ? (
                     <>
-                      <div className="px-3 py-2 border-b border-white/[0.08] shrink-0 space-y-1.5">
+                      <div className="admin-inbox-chat-top">
+                      <div className="px-3 py-2 border-b border-slate-200 shrink-0 space-y-1.5">
                         <div className="flex items-center gap-2 justify-between">
                           <div className="flex items-center gap-2.5 min-w-0">
-                            <div className="w-8 h-8 rounded-full bg-[#d12f2f] overflow-hidden flex items-center justify-center text-[11px] font-bold text-white shrink-0">
+                            <div className="w-8 h-8 rounded-full bg-[#d12f2f] overflow-hidden flex items-center justify-center text-[11px] font-bold text-slate-900 shrink-0">
                               {selectedConvo.customerAvatar ? (
                                 <img src={selectedConvo.customerAvatar} alt={`${selectedConvo.customerName} avatar`} className="w-full h-full object-cover" />
                               ) : (
@@ -5023,16 +5025,16 @@ export default function DashboardPage() {
                               )}
                             </div>
                             <div className="min-w-0">
-                              <p className="text-[13px] font-semibold text-white truncate">
+                              <p className="text-[13px] font-semibold text-slate-900 truncate">
                                 {selectedConvo.customerName}
                                 {selectedConvo.staffGameUsername ? (
-                                  <span className="font-normal text-[#c4b5fd]">
+                                  <span className="font-normal text-violet-500">
                                     {' '}
                                     · {selectedConvo.staffGameUsername}
                                   </span>
                                 ) : null}
                               </p>
-                              <p className="text-[11px] text-[#8892b0] truncate">@{selectedConvo.customerUsername} · Customer</p>
+                              <p className="text-[11px] text-slate-500 truncate">@{selectedConvo.customerUsername} · Customer</p>
                             </div>
                           </div>
                           <div className="flex items-center gap-0.5 shrink-0 relative">
@@ -5058,8 +5060,8 @@ export default function DashboardPage() {
                                 setInboxContactOpen(false)
                                 setInboxLabelsPopoverOpen((v) => !v)
                               }}
-                              className={`p-2 rounded-lg hover:bg-white/10 ${
-                                inboxLabelsPopoverOpen ? 'text-white bg-white/10' : 'text-[#9ea8cc] hover:text-white'
+                              className={`p-2 rounded-lg hover:bg-slate-100 ${
+                                inboxLabelsPopoverOpen ? 'text-slate-900 bg-white/10' : 'text-slate-500 hover:text-slate-900'
                               }`}
                               aria-expanded={inboxLabelsPopoverOpen}
                               aria-label="Labels"
@@ -5072,7 +5074,7 @@ export default function DashboardPage() {
                                 setInboxLabelsPopoverOpen(false)
                                 setInboxContactOpen((v) => !v)
                               }}
-                              className="p-2 rounded-lg text-[#9ea8cc] hover:text-white hover:bg-white/10"
+                              className="p-2 rounded-lg text-slate-500 hover:text-slate-900 hover:bg-slate-100"
                               aria-label="Open contact profile"
                             >
                               <MoreHorizontal className="w-5 h-5" />
@@ -5080,14 +5082,14 @@ export default function DashboardPage() {
                             {inboxLabelsPopoverOpen ? (
                               <div
                                 ref={inboxLabelsPopoverRef}
-                                className="absolute right-0 top-[calc(100%+6px)] z-30 w-[min(calc(100vw-2rem),320px)] rounded-2xl border border-white/10 bg-[#101937] shadow-[0_20px_40px_-25px_rgba(0,0,0,0.85)] overflow-hidden"
+                                className="absolute right-0 top-[calc(100%+6px)] z-30 w-[min(calc(100vw-2rem),320px)] rounded-2xl border border-slate-200 bg-white shadow-lg overflow-hidden"
                               >
-                                <div className="px-3 py-2 border-b border-white/10 flex items-center justify-between gap-2">
-                                  <p className="text-[13px] font-semibold text-white">Labels</p>
+                                <div className="px-3 py-2 border-b border-slate-200 flex items-center justify-between gap-2">
+                                  <p className="text-[13px] font-semibold text-slate-900">Labels</p>
                                   <button
                                     type="button"
                                     onClick={() => setInboxLabelsPopoverOpen(false)}
-                                    className="p-1 rounded-md text-[#9ea8cc] hover:text-white hover:bg-white/10"
+                                    className="p-1 rounded-md text-slate-500 hover:text-slate-900 hover:bg-slate-100"
                                     aria-label="Close labels"
                                   >
                                     <X className="w-4 h-4" />
@@ -5095,7 +5097,7 @@ export default function DashboardPage() {
                                 </div>
                                 <div className="max-h-[min(50vh,280px)] overflow-y-auto p-2 space-y-0.5">
                                   {inboxLabelCatalog.length === 0 ? (
-                                    <p className="text-xs text-[#7d86a8] px-2 py-3">
+                                    <p className="text-xs text-slate-500 px-2 py-3">
                                       No labels yet. Run the inbox labels migration in Supabase, then refresh.
                                     </p>
                                   ) : (
@@ -5105,13 +5107,13 @@ export default function DashboardPage() {
                                       return (
                                         <div
                                           key={def.id}
-                                          className="flex items-center gap-1 rounded-lg px-1.5 py-1 hover:bg-white/[0.04]"
+                                          className="flex items-center gap-1 rounded-lg px-1.5 py-1 hover:bg-slate-50"
                                         >
                                           <button
                                             type="button"
                                             disabled={busy || !selectedConvoId}
                                             onClick={() => void applyInboxLabelOnThread(def.id, !on, def)}
-                                            className="flex-1 min-w-0 flex items-center gap-2 text-left rounded-md px-2 py-1.5 text-[13px] text-[#e2e6f5] disabled:opacity-40"
+                                            className="flex-1 min-w-0 flex items-center gap-2 text-left rounded-md px-2 py-1.5 text-[13px] text-slate-800 disabled:opacity-40"
                                           >
                                             <span
                                               className="w-4 h-4 rounded border shrink-0 flex items-center justify-center text-[10px] font-bold"
@@ -5121,7 +5123,7 @@ export default function DashboardPage() {
                                             </span>
                                             <span className="truncate">{def.name}</span>
                                             {def.is_system ? (
-                                              <span className="text-[9px] text-[#5c647e] shrink-0 font-medium">preset</span>
+                                              <span className="text-[9px] text-slate-400 shrink-0 font-medium">preset</span>
                                             ) : null}
                                           </button>
                                           {!def.is_system ? (
@@ -5129,7 +5131,7 @@ export default function DashboardPage() {
                                               type="button"
                                               disabled={busy}
                                               onClick={() => void deleteInboxLabelDefinition(def.id)}
-                                              className="p-1.5 rounded-md text-[#9ea8cc] hover:text-red-300 hover:bg-red-500/10 disabled:opacity-40"
+                                              className="p-1.5 rounded-md text-slate-500 hover:text-red-300 hover:bg-red-500/10 disabled:opacity-40"
                                               aria-label={`Delete label ${def.name}`}
                                             >
                                               <Trash2 className="w-4 h-4" />
@@ -5140,11 +5142,11 @@ export default function DashboardPage() {
                                     })
                                   )}
                                 </div>
-                                <div className="p-2 border-t border-white/10 space-y-2 bg-[#0c1428]">
-                                  <p className="text-[10px] uppercase tracking-wide text-[#5c647e] font-semibold px-1">New label</p>
+                                <div className="p-2 border-t border-slate-200 space-y-2 bg-slate-50">
+                                  <p className="text-[10px] uppercase tracking-wide text-slate-400 font-semibold px-1">New label</p>
                                   <div className="flex gap-1.5">
                                     <input
-                                      className="flex-1 min-w-0 bg-[#111a31] border border-white/10 rounded-lg px-2.5 py-2 text-[13px] outline-none focus:border-[#6f54ff]/50"
+                                      className="flex-1 min-w-0 bg-slate-50 border border-slate-200 rounded-lg px-2.5 py-2 text-[13px] outline-none focus:border-[#6f54ff]/50"
                                       placeholder="e.g. Refund"
                                       value={newInboxLabelName}
                                       onChange={(e) => setNewInboxLabelName(e.target.value)}
@@ -5159,7 +5161,7 @@ export default function DashboardPage() {
                                       type="button"
                                       disabled={inboxLabelCreateBusy || !newInboxLabelName.trim()}
                                       onClick={() => void createInboxLabelFromDraft()}
-                                      className="shrink-0 rounded-lg px-3 py-2 text-[12px] font-semibold bg-white/10 text-white hover:bg-white/[0.14] disabled:opacity-40"
+                                      className="shrink-0 rounded-lg px-3 py-2 text-[12px] font-semibold bg-white/10 text-slate-900 hover:bg-white/[0.14] disabled:opacity-40"
                                     >
                                       {inboxLabelCreateBusy ? <Loader2 className="w-4 h-4 animate-spin" /> : 'Add'}
                                     </button>
@@ -5206,14 +5208,14 @@ export default function DashboardPage() {
                             })}
                           </div>
                               ) : (
-                          <p className="text-[10px] text-[#5c647e] pl-[42px] hidden sm:block">No labels — use the tag icon to add some.</p>
+                          <p className="text-[10px] text-slate-400 pl-[42px] hidden sm:block">No labels — use the tag icon to add some.</p>
                               )
                             })()}
                           </>
                         ) : null}
                       </div>
                       {showActiveEscalationBanner && selectedEscalation ? (
-                        <div className="mx-3 rounded-xl border border-orange-500/30 bg-orange-500/10 px-3 py-2 text-[12px] text-orange-100">
+                        <div className="mx-3 rounded-xl border border-orange-500/30 bg-orange-500/10 px-3 py-2 text-[12px] text-orange-100 shrink-0">
                           <p className="font-semibold text-orange-50">
                             Technical Escalation ·{' '}
                             {selectedEscalation.status === 'pending' ? 'Awaiting claim' : 'In progress'}
@@ -5244,9 +5246,10 @@ export default function DashboardPage() {
                           </div>
                         </div>
                       ) : null}
+                      </div>
                       {inboxContactOpen ? (
-                        <div className="absolute top-[62px] right-3 z-20 w-[280px] rounded-2xl border border-white/10 bg-[#101937] p-4 space-y-3 shadow-[0_20px_40px_-25px_rgba(0,0,0,0.8)]">
-                          <p className="text-sm font-semibold text-white">Contact profile</p>
+                        <div className="absolute top-[62px] right-3 z-20 w-[280px] rounded-2xl border border-slate-200 bg-white p-4 space-y-3 shadow-lg">
+                          <p className="text-sm font-semibold text-slate-900">Contact profile</p>
                           <div className="flex items-center gap-3">
                             <div className="w-12 h-12 rounded-full bg-[#6f54ff] overflow-hidden flex items-center justify-center font-bold">
                               {selectedConvo.customerAvatar ? (
@@ -5256,25 +5259,25 @@ export default function DashboardPage() {
                               )}
                             </div>
                             <div className="min-w-0">
-                              <p className="font-semibold text-white truncate">
+                              <p className="font-semibold text-slate-900 truncate">
                                 {selectedConvo.customerName}
                                 {selectedConvo.staffGameUsername ? (
-                                  <span className="font-normal text-[#c4b5fd]">
+                                  <span className="font-normal text-violet-500">
                                     {' '}
                                     · {selectedConvo.staffGameUsername}
                                   </span>
                                 ) : null}
                               </p>
-                              <p className="text-xs text-[#7d86a8] truncate">@{selectedConvo.customerUsername}</p>
+                              <p className="text-xs text-slate-500 truncate">@{selectedConvo.customerUsername}</p>
                             </div>
                           </div>
                           <div className="space-y-2">
-                            <label className="block text-[11px] font-medium text-[#9ea8cc]">
-                              Game username <span className="text-[#5c647e]">(staff only)</span>
+                            <label className="block text-[11px] font-medium text-slate-500">
+                              Game username <span className="text-slate-400">(staff only)</span>
                             </label>
                             <div className="flex gap-1.5">
                               <input
-                                className="flex-1 min-w-0 bg-[#111a31] border border-white/10 rounded-lg px-2.5 py-2 text-[13px] outline-none focus:border-[#6f54ff]/50"
+                                className="flex-1 min-w-0 bg-slate-50 border border-slate-200 rounded-lg px-2.5 py-2 text-[13px] outline-none focus:border-[#6f54ff]/50"
                                 placeholder="e.g. LuckyPlayer99"
                                 value={staffGameUsernameDraft}
                                 onChange={(e) => setStaffGameUsernameDraft(e.target.value)}
@@ -5289,28 +5292,28 @@ export default function DashboardPage() {
                                 type="button"
                                 disabled={staffGameUsernameBusy}
                                 onClick={() => void saveStaffGameUsername()}
-                                className="shrink-0 rounded-lg px-3 py-2 text-[12px] font-semibold bg-[#6f54ff]/20 text-[#d4cbff] hover:bg-[#6f54ff]/30 disabled:opacity-40"
+                                className="shrink-0 rounded-lg px-3 py-2 text-[12px] font-semibold bg-[#6f54ff]/20 text-violet-700 hover:bg-[#6f54ff]/30 disabled:opacity-40"
                               >
                                 {staffGameUsernameBusy ? <Loader2 className="w-4 h-4 animate-spin" /> : 'Save'}
                               </button>
                             </div>
-                            <p className="text-[10px] text-[#5c647e]">Shown next to their name in chat for quick reference.</p>
+                            <p className="text-[10px] text-slate-400">Shown next to their name in chat for quick reference.</p>
                           </div>
-                          <div className="pt-2 border-t border-white/10 text-xs text-[#7d86a8] space-y-1">
+                          <div className="pt-2 border-t border-slate-200 text-xs text-slate-500 space-y-1">
                             <p>Conversation ID</p>
-                            <p className="text-[#aeb7d6] font-mono truncate" title={selectedConvo.id}>
+                            <p className="text-slate-500 font-mono truncate" title={selectedConvo.id}>
                               {selectedConvo.id}
                             </p>
                           </div>
                         </div>
                       ) : null}
-                      <div ref={threadScrollRef} className="flex-1 min-h-0 overflow-y-auto p-3 space-y-2">
+                      <div ref={threadScrollRef} className="admin-inbox-chat-messages p-3 space-y-2">
                         {threadLoading ? (
                           <div className="flex justify-center py-12">
                             <Loader2 className="w-6 h-6 animate-spin text-[#f5d040]" />
                           </div>
                         ) : threadMessages.length === 0 ? (
-                          <p className="text-sm text-[#7d86a8] py-6 text-center">No messages yet. Say hello below.</p>
+                          <p className="text-sm text-slate-500 py-6 text-center">No messages yet. Say hello below.</p>
                         ) : (
                           threadMessages.map((m, i) => {
                             const isFromTeam = m.sender_id !== selectedConvo.customer_id
@@ -5334,7 +5337,7 @@ export default function DashboardPage() {
                               >
                                 {teamLine ? (
                                   <p
-                                    className="text-[10px] text-[#7d86a8] px-1 pb-0.5 font-medium truncate max-w-full text-right"
+                                    className="text-[10px] text-slate-500 px-1 pb-0.5 font-medium truncate max-w-full text-right"
                                     title={teamLine}
                                   >
                                     {teamLine}
@@ -5353,7 +5356,7 @@ export default function DashboardPage() {
                                         setReplyToMessage(m)
                                         setReplyIsInternal(false)
                                       }}
-                                      className="shrink-0 p-1.5 rounded-lg text-[#7d86a8] opacity-0 group-hover:opacity-100 hover:text-white hover:bg-white/10 transition-opacity"
+                                      className="shrink-0 p-1.5 rounded-lg text-slate-500 opacity-0 group-hover:opacity-100 hover:text-slate-900 hover:bg-slate-100 transition-opacity"
                                       aria-label="Reply to message"
                                       title="Reply"
                                     >
@@ -5371,8 +5374,8 @@ export default function DashboardPage() {
                                             isInternal
                                               ? 'border border-dashed border-amber-500/35 bg-amber-500/10 text-amber-50 px-3 py-2'
                                               : isFromTeam
-                                                ? 'bg-[#6f54ff] text-white px-3 py-2'
-                                                : 'bg-[#151d39] text-[#e2e6f5] px-3 py-2'
+                                                ? 'bg-[#6f54ff] text-slate-900 px-3 py-2'
+                                                : 'bg-slate-50 text-slate-800 px-3 py-2'
                                           }`
                                     }
                                   >
@@ -5410,19 +5413,19 @@ export default function DashboardPage() {
                                       <LinkifiedText
                                         text={m.body}
                                         className="whitespace-pre-wrap break-words"
-                                        linkClassName={isFromTeam ? 'text-white' : 'text-[#9eb4ff]'}
+                                        linkClassName={isFromTeam ? 'text-slate-900' : 'text-[#9eb4ff]'}
                                       />
                                     ) : null}
                                     {!imageOnly ? (
                                       <p
-                                        className={`text-[10px] mt-1 ${isFromTeam ? 'text-white/70' : 'text-[#7d86a8]'}`}
+                                        className={`text-[10px] mt-1 ${isFromTeam ? 'text-slate-900/70' : 'text-slate-500'}`}
                                       >
                                         {timeAgo(m.created_at)}
                                       </p>
                                     ) : null}
                                   </div>
                                   {imageOnly ? (
-                                    <p className="text-[10px] mt-1 px-0.5 text-[#7d86a8]">
+                                    <p className="text-[10px] mt-1 px-0.5 text-slate-500">
                                       {timeAgo(m.created_at)}
                                     </p>
                                   ) : null}
@@ -5434,7 +5437,7 @@ export default function DashboardPage() {
                                         setReplyToMessage(m)
                                         setReplyIsInternal(false)
                                       }}
-                                      className="shrink-0 p-1.5 rounded-lg text-[#7d86a8] opacity-0 group-hover:opacity-100 hover:text-white hover:bg-white/10 transition-opacity"
+                                      className="shrink-0 p-1.5 rounded-lg text-slate-500 opacity-0 group-hover:opacity-100 hover:text-slate-900 hover:bg-slate-100 transition-opacity"
                                       aria-label="Reply to message"
                                       title="Reply"
                                     >
@@ -5443,7 +5446,7 @@ export default function DashboardPage() {
                                   ) : null}
                                 </div>
                                 {showSeen ? (
-                                  <p className="text-[11px] text-[#7d86a8] mt-1 px-1">Seen · {timeAgo(m.read_at!)}</p>
+                                  <p className="text-[11px] text-slate-500 mt-1 px-1">Seen · {timeAgo(m.read_at!)}</p>
                                 ) : null}
                               </div>
                             )
@@ -5451,13 +5454,13 @@ export default function DashboardPage() {
                         )}
                         <div ref={threadEndRef} className="h-px w-full" aria-hidden />
                       </div>
-                      <div className="p-2.5 border-t border-white/10 space-y-2 shrink-0 bg-[rgba(11,18,40,0.98)]">
+                      <div className="admin-inbox-chat-composer p-2.5 border-t border-slate-200 space-y-2 bg-white relative z-10">
                         {peerCustomerTyping ? (
-                          <p className="text-xs text-[#7d86a8]" aria-live="polite">
+                          <p className="text-xs text-slate-500" aria-live="polite">
                             {selectedConvo.customerName} is typing...
                           </p>
                         ) : null}
-                        <label className="flex items-center gap-2 text-[11px] text-[#8892b0] cursor-pointer select-none">
+                        <label className="flex items-center gap-2 text-[11px] text-slate-500 cursor-pointer select-none">
                           <input
                             type="checkbox"
                             checked={replyIsInternal}
@@ -5465,23 +5468,23 @@ export default function DashboardPage() {
                               setReplyIsInternal(e.target.checked)
                               if (e.target.checked) setReplyToMessage(null)
                             }}
-                            className="rounded border-white/20 bg-[#111a31] text-[#f97316] focus:ring-[#f97316]/40"
+                            className="rounded border-slate-300 bg-slate-50 text-[#f97316] focus:ring-[#f97316]/40"
                           />
                           Internal note (customer won&apos;t see)
                         </label>
                         {replyToMessage && !replyIsInternal ? (
-                          <div className="flex items-start gap-2 rounded-xl border border-[#6f54ff]/30 bg-[#6f54ff]/10 px-2.5 py-2">
-                            <CornerDownRight className="w-4 h-4 shrink-0 text-[#c4b5fd] mt-0.5" aria-hidden />
+                          <div className="flex items-start gap-2 rounded-xl border border-violet-200 bg-violet-50 px-2.5 py-2">
+                            <CornerDownRight className="w-4 h-4 shrink-0 text-violet-500 mt-0.5" aria-hidden />
                             <div className="min-w-0 flex-1">
-                              <p className="text-[11px] font-semibold text-[#d4cbff]">Replying to</p>
-                              <p className="text-[12px] text-[#e2e6f5] truncate">
+                              <p className="text-[11px] font-semibold text-violet-700">Replying to</p>
+                              <p className="text-[12px] text-slate-800 truncate">
                                 {formatReplyPreviewText(replyToMessage.body, Boolean(replyToMessage.image_url))}
                               </p>
                             </div>
                             <button
                               type="button"
                               onClick={() => setReplyToMessage(null)}
-                              className="shrink-0 p-1 rounded-md text-[#9ea8cc] hover:text-white hover:bg-white/10"
+                              className="shrink-0 p-1 rounded-md text-slate-500 hover:text-slate-900 hover:bg-slate-100"
                               aria-label="Cancel reply"
                             >
                               <X className="w-4 h-4" />
@@ -5496,17 +5499,17 @@ export default function DashboardPage() {
                           onChange={onReplyImagePick}
                         />
                         {replyPendingImage ? (
-                          <div className="relative rounded-xl overflow-hidden border border-white/10 max-h-32 w-fit max-w-full">
+                          <div className="relative rounded-xl overflow-hidden border border-slate-200 max-h-32 w-fit max-w-full">
                             {/* eslint-disable-next-line @next/next/no-img-element */}
                             <img
                               src={replyPendingImage.previewUrl}
                               alt="Attachment preview"
-                              className="max-h-32 w-auto max-w-full object-contain bg-[#0a1020]"
+                              className="max-h-32 w-auto max-w-full object-contain bg-slate-100"
                             />
                             <button
                               type="button"
                               onClick={() => clearReplyPendingImage()}
-                              className="absolute top-1 right-1 w-7 h-7 rounded-full bg-black/65 text-white flex items-center justify-center text-xs hover:bg-black/80"
+                              className="absolute top-1 right-1 w-7 h-7 rounded-full bg-black/65 text-slate-900 flex items-center justify-center text-xs hover:bg-black/80"
                               aria-label="Remove photo"
                             >
                               <X className="w-4 h-4" />
@@ -5518,7 +5521,7 @@ export default function DashboardPage() {
                             type="button"
                             onClick={() => replyImageInputRef.current?.click()}
                             disabled={replyBusy}
-                            className="shrink-0 p-2.5 rounded-xl border border-white/10 bg-[#111a31] text-[#aeb7d6] hover:text-white hover:border-[#6f54ff]/50 disabled:opacity-40"
+                            className="shrink-0 p-2.5 rounded-xl border border-slate-200 bg-slate-50 text-slate-500 hover:text-slate-900 hover:border-[#6f54ff]/50 disabled:opacity-40"
                             aria-label="Attach image"
                           >
                             <ImagePlus className="w-5 h-5" />
@@ -5533,10 +5536,10 @@ export default function DashboardPage() {
                                 setCannedPopoverOpen((v) => !v)
                               }}
                               disabled={replyBusy}
-                              className={`p-2.5 rounded-xl border border-white/10 bg-[#111a31] disabled:opacity-40 ${
+                              className={`p-2.5 rounded-xl border border-slate-200 bg-slate-50 disabled:opacity-40 ${
                                 cannedPopoverOpen
-                                  ? 'text-white border-[#6f54ff]/50'
-                                  : 'text-[#aeb7d6] hover:text-white hover:border-[#6f54ff]/50'
+                                  ? 'text-slate-900 border-[#6f54ff]/50'
+                                  : 'text-slate-500 hover:text-slate-900 hover:border-[#6f54ff]/50'
                               }`}
                               aria-expanded={cannedPopoverOpen}
                               aria-label="Quick replies"
@@ -5546,22 +5549,22 @@ export default function DashboardPage() {
                             {cannedPopoverOpen ? (
                               <div
                                 ref={cannedPopoverRef}
-                                className="absolute bottom-[calc(100%+8px)] left-0 z-30 w-[min(calc(100vw-2rem),360px)] max-h-[min(70vh,420px)] overflow-hidden rounded-2xl border border-white/10 bg-[#101937] shadow-[0_20px_40px_-25px_rgba(0,0,0,0.85)] flex flex-col"
+                                className="absolute bottom-[calc(100%+8px)] left-0 z-30 w-[min(calc(100vw-2rem),360px)] max-h-[min(70vh,420px)] overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-lg flex flex-col"
                               >
-                                <div className="flex items-center justify-between gap-2 border-b border-white/10 px-3 py-2 shrink-0">
-                                  <p className="text-[13px] font-semibold text-white">Quick replies</p>
+                                <div className="flex items-center justify-between gap-2 border-b border-slate-200 px-3 py-2 shrink-0">
+                                  <p className="text-[13px] font-semibold text-slate-900">Quick replies</p>
                                   <button
                                     type="button"
                                     onClick={() => setCannedPopoverOpen(false)}
-                                    className="rounded-md p-1 text-[#9ea8cc] hover:bg-white/10 hover:text-white"
+                                    className="rounded-md p-1 text-slate-500 hover:bg-slate-100 hover:text-slate-900"
                                     aria-label="Close quick replies"
                                   >
                                     <X className="w-4 h-4" />
                                   </button>
                                 </div>
-                                <div className="px-2 py-2 border-b border-white/10 shrink-0">
+                                <div className="px-2 py-2 border-b border-slate-200 shrink-0">
                                   <input
-                                    className="w-full rounded-lg border border-white/10 bg-[#0c1428] px-2.5 py-2 text-[12px] text-[#e2e6f5] outline-none focus:border-[#6f54ff]/50"
+                                    className="w-full rounded-lg border border-slate-200 bg-slate-50 px-2.5 py-2 text-[12px] text-slate-800 outline-none focus:border-[#6f54ff]/50"
                                     placeholder="Filter saved replies..."
                                     value={cannedPickerQuery}
                                     onChange={(e) => setCannedPickerQuery(e.target.value)}
@@ -5569,7 +5572,7 @@ export default function DashboardPage() {
                                 </div>
                                 <div className="flex-1 min-h-0 overflow-y-auto p-2 space-y-1">
                                   {filteredCannedPickerList.length === 0 ? (
-                                    <p className="px-2 py-4 text-center text-[12px] text-[#7d86a8]">
+                                    <p className="px-2 py-4 text-center text-[12px] text-slate-500">
                                       {cannedReplies.length === 0
                                         ? 'No saved replies yet. Add one below (requires inbox_canned_replies migration).'
                                         : 'No matches.'}
@@ -5578,11 +5581,11 @@ export default function DashboardPage() {
                                     filteredCannedPickerList.map((r) => (
                                       <div
                                         key={r.id}
-                                        className="rounded-xl border border-white/[0.06] bg-[#0c1428] p-2.5 space-y-2"
+                                        className="rounded-xl border border-slate-200 bg-slate-50 p-2.5 space-y-2"
                                       >
                                         <div className="min-w-0">
-                                          <p className="text-[12px] font-semibold text-white truncate">{r.title}</p>
-                                          <p className="text-[11px] text-[#8892b0] line-clamp-2 whitespace-pre-wrap break-words">
+                                          <p className="text-[12px] font-semibold text-slate-900 truncate">{r.title}</p>
+                                          <p className="text-[11px] text-slate-500 line-clamp-2 whitespace-pre-wrap break-words">
                                             {r.body}
                                           </p>
                                         </div>
@@ -5591,7 +5594,7 @@ export default function DashboardPage() {
                                             type="button"
                                             disabled={replyBusy}
                                             onClick={() => insertCannedReplyIntoDraft(r)}
-                                            className="rounded-lg bg-gradient-to-r from-[#6f54ff] to-[#b8860b] px-2.5 py-1.5 text-[11px] font-semibold text-white disabled:opacity-40"
+                                            className="rounded-lg bg-gradient-to-r from-[#6f54ff] to-[#b8860b] px-2.5 py-1.5 text-[11px] font-semibold text-slate-900 disabled:opacity-40"
                                           >
                                             Insert
                                           </button>
@@ -5599,7 +5602,7 @@ export default function DashboardPage() {
                                             type="button"
                                             disabled={cannedDeleteBusyId === r.id}
                                             onClick={() => beginEditCanned(r)}
-                                            className="inline-flex items-center gap-1 rounded-lg border border-white/10 px-2 py-1.5 text-[11px] font-medium text-[#c4cbe6] hover:bg-white/[0.06]"
+                                            className="inline-flex items-center gap-1 rounded-lg border border-slate-200 px-2 py-1.5 text-[11px] font-medium text-slate-600 hover:bg-slate-100"
                                           >
                                             <Pencil className="w-3 h-3" />
                                             Edit
@@ -5622,18 +5625,18 @@ export default function DashboardPage() {
                                     ))
                                   )}
                                 </div>
-                                <div className="border-t border-white/10 bg-[#0c1428] p-2.5 space-y-2 shrink-0">
-                                  <p className="text-[10px] font-semibold uppercase tracking-wide text-[#5c647e] px-0.5">
+                                <div className="border-t border-slate-200 bg-slate-50 p-2.5 space-y-2 shrink-0">
+                                  <p className="text-[10px] font-semibold uppercase tracking-wide text-slate-400 px-0.5">
                                     {cannedEditId ? 'Edit quick reply' : 'New quick reply'}
                                   </p>
                                   <input
-                                    className="w-full rounded-lg border border-white/10 bg-[#111a31] px-2.5 py-2 text-[12px] text-[#e2e6f5] outline-none focus:border-[#6f54ff]/50"
+                                    className="w-full rounded-lg border border-slate-200 bg-slate-50 px-2.5 py-2 text-[12px] text-slate-800 outline-none focus:border-[#6f54ff]/50"
                                     placeholder="Short title (e.g. Thanks — investigating)"
                                     value={cannedFormTitle}
                                     onChange={(e) => setCannedFormTitle(e.target.value)}
                                   />
                                   <textarea
-                                    className="w-full min-h-[88px] resize-y rounded-lg border border-white/10 bg-[#111a31] px-2.5 py-2 text-[12px] text-[#e2e6f5] outline-none focus:border-[#6f54ff]/50"
+                                    className="w-full min-h-[88px] resize-y rounded-lg border border-slate-200 bg-slate-50 px-2.5 py-2 text-[12px] text-slate-800 outline-none focus:border-[#6f54ff]/50"
                                     placeholder="Message body... Use placeholders: {customer_name}, {username}, {business}"
                                     value={cannedFormBody}
                                     onChange={(e) => setCannedFormBody(e.target.value)}
@@ -5643,7 +5646,7 @@ export default function DashboardPage() {
                                       type="button"
                                       disabled={cannedSaveBusy}
                                       onClick={() => void saveCannedReplyForm()}
-                                      className="rounded-lg bg-white/10 px-3 py-2 text-[12px] font-semibold text-white hover:bg-white/[0.14] disabled:opacity-40"
+                                      className="rounded-lg bg-white/10 px-3 py-2 text-[12px] font-semibold text-slate-900 hover:bg-white/[0.14] disabled:opacity-40"
                                     >
                                       {cannedSaveBusy ? <Loader2 className="h-4 w-4 animate-spin" /> : cannedEditId ? 'Save changes' : 'Save reply'}
                                     </button>
@@ -5651,7 +5654,7 @@ export default function DashboardPage() {
                                       <button
                                         type="button"
                                         onClick={() => cancelCannedForm()}
-                                        className="rounded-lg border border-white/10 px-3 py-2 text-[12px] font-medium text-[#c4cbe6] hover:bg-white/[0.06]"
+                                        className="rounded-lg border border-slate-200 px-3 py-2 text-[12px] font-medium text-slate-600 hover:bg-slate-100"
                                       >
                                         Cancel edit
                                       </button>
@@ -5663,7 +5666,7 @@ export default function DashboardPage() {
                           </div>
                           <textarea
                             rows={1}
-                            className="flex-1 min-w-0 bg-[#111a31] border border-white/10 rounded-xl px-3 py-2.5 text-sm outline-none focus:border-[#6f54ff] resize-none min-h-[42px] max-h-32"
+                            className="flex-1 min-w-0 bg-slate-50 border border-slate-200 rounded-xl px-3 py-2.5 text-sm outline-none focus:border-[#6f54ff] resize-none min-h-[42px] max-h-32"
                             placeholder={replyIsInternal ? 'Internal note for staff...' : 'Reply or add a caption...'}
                             value={replyDraft}
                             onChange={(e) => setReplyDraft(e.target.value)}
@@ -5683,14 +5686,14 @@ export default function DashboardPage() {
                             Send
                           </button>
                         </div>
-                        <p className="text-[10px] text-[#5c647e] hidden sm:block">
+                        <p className="text-[10px] text-slate-400 hidden sm:block">
                           Photos only (no video). Quick replies support {'{customer_name}'}, {'{username}'}, and {'{business}'} in the saved
                           message.
                         </p>
                       </div>
                     </>
                   ) : (
-                    <div className="h-full flex items-center justify-center px-5 text-center text-[#7d86a8] text-sm">
+                    <div className="h-full flex items-center justify-center px-5 text-center text-slate-500 text-sm">
                       Select a conversation from the left to open thread details.
                     </div>
                   )}
@@ -5698,26 +5701,26 @@ export default function DashboardPage() {
 
               </div>
             )}
-          </section>
+          </>
         )}
         />
 
         <StaffTabPanel tab="users" activeTab={activeTab} mountedTabs={mountedTabs} render={() => (
           <section className="space-y-4">
             {usersRefreshing ? (
-              <p className="text-[11px] text-[#8892b0] flex items-center gap-1.5">
+              <p className="text-[11px] text-slate-500 flex items-center gap-1.5">
                 <Loader2 className="w-3.5 h-3.5 animate-spin" />
                 Refreshing members…
               </p>
             ) : null}
             {usersLoading ? (
-              <div className="flex items-center justify-center py-12 text-[#8892b0]">
+              <div className="flex items-center justify-center py-12 text-slate-500">
                 <Loader2 className="w-6 h-6 animate-spin text-[#f5d040] mr-2" />
                 Loading members…
               </div>
             ) : (
             <>
-            <p className="text-[12px] text-[#8892b0] leading-relaxed">
+            <p className="text-[12px] text-slate-500 leading-relaxed">
               New customers join instantly with a welcome message. Manage active members here — suspend or remove accounts as needed. The Pending tab
               shows any legacy signups still awaiting manual review.
             </p>
@@ -5732,7 +5735,7 @@ export default function DashboardPage() {
                 accent="purple"
               />
             </div>
-              <div className="flex gap-0.5 rounded-[10px] bg-[#0f1834] p-0.5">
+              <div className="flex gap-0.5 rounded-[10px] bg-slate-50 p-0.5">
                 <button
                   type="button"
                   onClick={() => {
@@ -5740,7 +5743,7 @@ export default function DashboardPage() {
                     setActiveMemberQuery('')
                   }}
                   className={`flex-1 rounded-lg py-1.5 text-[11px] font-semibold transition-colors ${
-                    usersPanelTab === 'pending' ? 'bg-[rgba(141,99,255,0.15)] text-[#f5d040]' : 'text-[#8892b0] hover:text-[#c4cbe6]'
+                    usersPanelTab === 'pending' ? 'bg-[rgba(141,99,255,0.15)] text-[#f5d040]' : 'text-slate-500 hover:text-slate-600'
                   }`}
                 >
                   Pending ({pendingCustomers.length})
@@ -5749,7 +5752,7 @@ export default function DashboardPage() {
                   type="button"
                   onClick={() => setUsersPanelTab('active')}
                   className={`flex-1 rounded-lg py-1.5 text-[11px] font-semibold transition-colors ${
-                    usersPanelTab === 'active' ? 'bg-[rgba(141,99,255,0.15)] text-[#f5d040]' : 'text-[#8892b0] hover:text-[#c4cbe6]'
+                    usersPanelTab === 'active' ? 'bg-[rgba(141,99,255,0.15)] text-[#f5d040]' : 'text-slate-500 hover:text-slate-600'
                   }`}
                 >
                   Active ({activeMembers.length})
@@ -5761,7 +5764,7 @@ export default function DashboardPage() {
                     setActiveMemberQuery('')
                   }}
                   className={`flex-1 rounded-lg py-1.5 text-[11px] font-semibold transition-colors ${
-                    usersPanelTab === 'suspended' ? 'bg-[rgba(141,99,255,0.15)] text-[#f5d040]' : 'text-[#8892b0] hover:text-[#c4cbe6]'
+                    usersPanelTab === 'suspended' ? 'bg-[rgba(141,99,255,0.15)] text-[#f5d040]' : 'text-slate-500 hover:text-slate-600'
                   }`}
                 >
                   Suspended ({suspendedMembers.length})
@@ -5770,32 +5773,32 @@ export default function DashboardPage() {
 
               {usersPanelTab === 'pending' ? (
                 <div className="space-y-2">
-                  <h4 className="text-sm font-semibold tracking-wide text-[#9ea8cc] uppercase">Pending approval</h4>
-                  <p className="text-[#7d86a8] text-xs">
+                  <h4 className="text-sm font-semibold tracking-wide text-slate-500 uppercase">Pending approval</h4>
+                  <p className="text-slate-500 text-xs">
                     Status: <span className="text-amber-300 font-medium">pending</span> — new signups are auto-approved; this list is for older accounts only.
                   </p>
-                  <div className="rounded-2xl border border-white/10 bg-[#0d1428]/90 p-2.5 sm:p-3 space-y-2.5 shadow-[0_20px_50px_-35px_rgba(30,49,112,0.95)]">
+                  <div className="rounded-2xl border border-slate-200 bg-slate-50 p-2.5 sm:p-3 space-y-2.5 shadow-sm">
                     {pendingCustomers.length === 0 ? (
-                      <p className="text-sm text-[#7d86a8] py-4 text-center">No pending signups — all new accounts are approved automatically.</p>
+                      <p className="text-sm text-slate-500 py-4 text-center">No pending signups — all new accounts are approved automatically.</p>
                     ) : (
                       pendingCustomers.map((cust) => (
-                        <article key={cust.id} className="rounded-xl border border-white/10 bg-[#121d3a] p-3 space-y-2.5">
+                        <article key={cust.id} className="rounded-xl border border-slate-200 bg-white p-3 space-y-2.5">
                           <div>
                             <p className="font-semibold">
                               {`${cust.first_name ?? ''} ${cust.last_name ?? ''}`.trim() || cust.username}
                             </p>
-                            <p className="text-[#7d86a8] text-sm flex flex-wrap items-center gap-2">
+                            <p className="text-slate-500 text-sm flex flex-wrap items-center gap-2">
                               <span>
                                 @{cust.username} · joined {timeAgo(cust.created_at)}
                               </span>
                               <AccountStatusBadge status={cust.account_status || 'pending'} />
                             </p>
-                            <div className="mt-1.5 grid grid-cols-1 sm:grid-cols-2 gap-x-4 gap-y-1 text-xs text-[#9ea8cc]">
+                            <div className="mt-1.5 grid grid-cols-1 sm:grid-cols-2 gap-x-4 gap-y-1 text-xs text-slate-500">
                               <p className="break-all">
-                                <span className="text-[#7d86a8]">Username:</span> @{cust.username}
+                                <span className="text-slate-500">Username:</span> @{cust.username}
                               </p>
                               <p className="break-all">
-                                <span className="text-[#7d86a8]">Email:</span>{' '}
+                                <span className="text-slate-500">Email:</span>{' '}
                                 {cust.email ? (
                                   <>
                                     {cust.email}
@@ -5810,28 +5813,28 @@ export default function DashboardPage() {
                                     </span>
                                   </>
                                 ) : (
-                                  <span className="text-[#7d86a8]">—</span>
+                                  <span className="text-slate-500">—</span>
                                 )}
                               </p>
                               <p className="break-all">
-                                <span className="text-[#7d86a8]">Phone:</span>{' '}
-                                {cust.phone?.trim() ? cust.phone : <span className="text-[#7d86a8]">—</span>}
+                                <span className="text-slate-500">Phone:</span>{' '}
+                                {cust.phone?.trim() ? cust.phone : <span className="text-slate-500">—</span>}
                               </p>
                               <p className="break-all">
-                                <span className="text-[#7d86a8]">Referral:</span>{' '}
+                                <span className="text-slate-500">Referral:</span>{' '}
                                 {cust.referral_username ? (
                                   `@${cust.referral_username}`
                                 ) : (
-                                  <span className="text-[#7d86a8]">—</span>
+                                  <span className="text-slate-500">—</span>
                                 )}
                               </p>
                               {cust.signup_question?.trim() ? (
-                                <p className="break-words sm:col-span-2 rounded-lg border border-white/10 bg-[#0d1220] px-3 py-2 text-[#c4cbe6]">
-                                  <span className="text-[#7d86a8]">Question:</span> {cust.signup_question.trim()}
+                                <p className="break-words sm:col-span-2 rounded-lg border border-slate-200 bg-slate-50 px-3 py-2 text-slate-600">
+                                  <span className="text-slate-500">Question:</span> {cust.signup_question.trim()}
                                 </p>
                               ) : null}
                               <p className="break-all sm:col-span-2">
-                                <span className="text-[#7d86a8]">Signed up:</span>{' '}
+                                <span className="text-slate-500">Signed up:</span>{' '}
                                 {new Date(cust.created_at).toLocaleString()} ({timeAgo(cust.created_at)})
                               </p>
                             </div>
@@ -5871,20 +5874,20 @@ export default function DashboardPage() {
 
               {usersPanelTab === 'active' ? (
                 <div className="space-y-2">
-                  <h4 className="text-sm font-semibold tracking-wide text-[#9ea8cc] uppercase">Active members</h4>
-                  <p className="text-[#7d86a8] text-xs">
+                  <h4 className="text-sm font-semibold tracking-wide text-slate-500 uppercase">Active members</h4>
+                  <p className="text-slate-500 text-xs">
                     Customers approved for the platform who follow your business or have a support thread with you.
                   </p>
                   {activeMembers.length > 0 ? (
                     <div className="space-y-1">
                       <div className="relative">
                         <Search
-                          className="pointer-events-none absolute left-2.5 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-[#5c647e]"
+                          className="pointer-events-none absolute left-2.5 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-slate-400"
                           aria-hidden
                         />
                         <input
                           type="search"
-                          className="w-full rounded-xl border border-white/10 bg-[#0d1428] py-2 pl-8 pr-2 text-sm text-[#e2e6f5] outline-none focus:border-[#6f54ff]/50"
+                          className="w-full rounded-xl border border-slate-200 bg-slate-50 py-2 pl-8 pr-2 text-sm text-slate-800 outline-none focus:border-[#6f54ff]/50"
                           placeholder="Search by name, @username, or email..."
                           value={activeMemberQuery}
                           onChange={(e) => setActiveMemberQuery(e.target.value)}
@@ -5892,7 +5895,7 @@ export default function DashboardPage() {
                         />
                       </div>
                       {activeMemberQuery.trim() ? (
-                        <p className="text-[10px] text-[#5c647e] px-0.5">
+                        <p className="text-[10px] text-slate-400 px-0.5">
                           {filteredActiveMembers.length} match{filteredActiveMembers.length === 1 ? '' : 'es'} for your
                           search
                           {filteredActiveMembers.length === 0 ? ' — try another name or @handle' : ''}
@@ -5900,34 +5903,34 @@ export default function DashboardPage() {
                       ) : null}
                     </div>
                   ) : null}
-                  <div className="rounded-2xl border border-white/10 bg-[#0d1428]/90 divide-y divide-white/10 shadow-[0_20px_50px_-35px_rgba(30,49,112,0.95)] max-h-[380px] overflow-y-auto">
+                  <div className="rounded-2xl border border-slate-200 bg-slate-50 divide-y divide-slate-200 shadow-sm max-h-[380px] overflow-y-auto">
                     {activeMemberQuery.trim().length >= 2 &&
                     activeMemberLookup &&
                     !activeMembers.some((m) => m.id === activeMemberLookup.id) ? (
                       <div className="px-3 py-2.5 border-b border-[#6f54ff]/25 bg-[#6f54ff]/8">
-                        <p className="text-[10px] uppercase tracking-wide text-[#9ea8cc] mb-1">Found on platform</p>
+                        <p className="text-[10px] uppercase tracking-wide text-slate-500 mb-1">Found on platform</p>
                         <p className="font-medium text-[14px]">
                           {[activeMemberLookup.first_name, activeMemberLookup.last_name].filter(Boolean).join(' ').trim() ||
                             activeMemberLookup.username}
                         </p>
-                        <p className="text-[13px] text-[#7d86a8]">
+                        <p className="text-[13px] text-slate-500">
                           @{activeMemberLookup.username}
                           {activeMemberLookup.email ? ` · ${activeMemberLookup.email}` : ''}
                         </p>
-                        <p className="text-[11px] text-[#7d86a8] mt-1">
+                        <p className="text-[11px] text-slate-500 mt-1">
                           Status: {activeMemberLookup.account_status}. They must follow your business or message you to appear in Active members.
                         </p>
                       </div>
                     ) : null}
                     {activeMemberLookupBusy && activeMemberQuery.trim().length >= 2 ? (
-                      <p className="text-xs text-[#7d86a8] px-3 py-2">Looking up account...</p>
+                      <p className="text-xs text-slate-500 px-3 py-2">Looking up account...</p>
                     ) : null}
                     {activeMembers.length === 0 ? (
-                      <p className="text-sm text-[#7d86a8] py-6 px-4 text-center">
+                      <p className="text-sm text-slate-500 py-6 px-4 text-center">
                         No active members linked to this business yet — approve customers and have them follow or message you.
                       </p>
                     ) : filteredActiveMembers.length === 0 ? (
-                      <p className="text-sm text-[#7d86a8] py-6 px-4 text-center">
+                      <p className="text-sm text-slate-500 py-6 px-4 text-center">
                         {activeMemberLookup
                           ? 'No linked members match — see the account found above if shown.'
                           : 'No members match your search.'}
@@ -5947,11 +5950,11 @@ export default function DashboardPage() {
                                   <img
                                     src={m.avatar_url}
                                     alt={`${label} avatar`}
-                                    className="w-9 h-9 rounded-full object-cover border border-white/10 shrink-0"
+                                    className="w-9 h-9 rounded-full object-cover border border-slate-200 shrink-0"
                                   />
                                 ) : (
                                   <div
-                                    className="w-9 h-9 rounded-full flex items-center justify-center text-white text-xs font-bold shrink-0 border border-white/10"
+                                    className="w-9 h-9 rounded-full flex items-center justify-center text-slate-900 text-xs font-bold shrink-0 border border-slate-200"
                                     style={{ backgroundColor: '#606770' }}
                                   >
                                     {memberInitials}
@@ -5959,7 +5962,7 @@ export default function DashboardPage() {
                                 )}
                                 <div className="min-w-0">
                                   <p className="font-medium truncate text-[14px]">{label}</p>
-                                  <p className="text-[13px] text-[#7d86a8] truncate flex flex-wrap items-center gap-2">
+                                  <p className="text-[13px] text-slate-500 truncate flex flex-wrap items-center gap-2">
                                     <span>@{m.username}</span>
                                     <AccountStatusBadge status={m.account_status} />
                                   </p>
@@ -6004,7 +6007,7 @@ export default function DashboardPage() {
                             {composeOpen ? (
                               <div className="flex gap-2 pl-12">
                                 <input
-                                  className="flex-1 min-w-0 bg-[#111a31] border border-white/10 rounded-xl px-3 py-2 text-sm outline-none focus:border-[#6f54ff] disabled:opacity-50"
+                                  className="flex-1 min-w-0 bg-slate-50 border border-slate-200 rounded-xl px-3 py-2 text-sm outline-none focus:border-[#6f54ff] disabled:opacity-50"
                                   placeholder="Type a message..."
                                   value={memberDraft}
                                   disabled={memberSending}
@@ -6043,13 +6046,13 @@ export default function DashboardPage() {
 
               {usersPanelTab === 'suspended' ? (
                 <div className="space-y-2">
-                  <h4 className="text-sm font-semibold tracking-wide text-[#9ea8cc] uppercase">Suspended</h4>
-                  <p className="text-[#7d86a8] text-xs">
+                  <h4 className="text-sm font-semibold tracking-wide text-slate-500 uppercase">Suspended</h4>
+                  <p className="text-slate-500 text-xs">
                     These customers cannot use the app until you unsuspend them. Actions are recorded in the moderation log.
                   </p>
-                  <div className="rounded-2xl border border-amber-500/20 bg-[#0d1428]/90 divide-y divide-white/10 shadow-[0_20px_50px_-35px_rgba(30,49,112,0.95)] max-h-[340px] overflow-y-auto">
+                  <div className="rounded-2xl border border-amber-500/20 bg-slate-50 divide-y divide-slate-200 shadow-sm max-h-[340px] overflow-y-auto">
                     {suspendedMembers.length === 0 ? (
-                      <p className="text-sm text-[#7d86a8] py-6 px-4 text-center">No suspended members for this business.</p>
+                      <p className="text-sm text-slate-500 py-6 px-4 text-center">No suspended members for this business.</p>
                     ) : (
                       suspendedMembers.map((m) => {
                         const label = `${m.first_name ?? ''} ${m.last_name ?? ''}`.trim() || m.username
@@ -6057,7 +6060,7 @@ export default function DashboardPage() {
                           <div key={m.id} className="flex flex-wrap items-center justify-between gap-2.5 px-3 py-2.5">
                             <div className="min-w-0">
                               <p className="font-medium truncate text-[14px]">{label}</p>
-                              <p className="text-[13px] text-[#7d86a8] truncate flex flex-wrap items-center gap-2">
+                              <p className="text-[13px] text-slate-500 truncate flex flex-wrap items-center gap-2">
                                 <span>@{m.username}</span>
                                 <AccountStatusBadge status={m.account_status} />
                               </p>
@@ -6097,8 +6100,8 @@ export default function DashboardPage() {
         {isAdmin ? (
         <StaffTabPanel tab="team" activeTab={activeTab} mountedTabs={mountedTabs} render={() => (
           <section className="space-y-4 max-w-3xl">
-            <p className="text-[12px] text-[#8892b0] leading-relaxed">
-              Create <strong className="text-[#c4cbe6]">support</strong> accounts for Juwa App / Website inboxes, and{' '}
+            <p className="text-[12px] text-slate-500 leading-relaxed">
+              Create <strong className="text-slate-600">support</strong> accounts for Juwa App / Website inboxes, and{' '}
               <strong className="text-[#fdba74]">technical</strong> accounts for the escalations queue. Technical staff sign in at{' '}
               <Link href="/login/technical" className="text-[#fdba74] hover:underline font-medium">
                 /login/technical
@@ -6106,16 +6109,16 @@ export default function DashboardPage() {
               (separate from main staff login).
             </p>
             {isAdmin ? (
-              <div className="rounded-2xl border border-white/[0.08] bg-[rgba(11,18,40,0.9)] p-4 space-y-3">
-                <h3 className="text-sm font-semibold text-white">Add support staff</h3>
-                <p className="text-[11px] text-[#8892b0]">
-                  They sign in at {JUWA2_BRAND} with <strong className="text-[#c4cbe6]">email + password</strong> (same login page as you). Username is their
-                  public <strong className="text-[#c4cbe6]">@handle</strong> for sign-in (lowercase, digits, underscore; 3–30 chars). Only{' '}
-                  <strong className="text-[#c4cbe6]">first name</strong> is collected here for your records. Up to 4 support agents per business.
+              <div className="rounded-2xl border border-slate-200 bg-white shadow-sm p-4 space-y-3">
+                <h3 className="text-sm font-semibold text-slate-900">Add support staff</h3>
+                <p className="text-[11px] text-slate-500">
+                  They sign in at {JUWA2_BRAND} with <strong className="text-slate-600">email + password</strong> (same login page as you). Username is their
+                  public <strong className="text-slate-600">@handle</strong> for sign-in (lowercase, digits, underscore; 3–30 chars). Only{' '}
+                  <strong className="text-slate-600">first name</strong> is collected here for your records. Up to 4 support agents per business.
                 </p>
-                <div className="rounded-xl border border-white/[0.08] bg-[#0c1428] p-3 space-y-2">
-                  <p className="text-[10px] font-bold uppercase tracking-[0.14em] text-[#8892b0]">Inbox assignment</p>
-                  <p className="text-[11px] text-[#7d86a8]">Which customer messages this agent can see and reply to.</p>
+                <div className="rounded-xl border border-slate-200 bg-slate-50 p-3 space-y-2">
+                  <p className="text-[10px] font-bold uppercase tracking-[0.14em] text-slate-500">Inbox assignment</p>
+                  <p className="text-[11px] text-slate-500">Which customer messages this agent can see and reply to.</p>
                   <div className="grid grid-cols-1 sm:grid-cols-3 gap-2">
                     {(['both', 'website', 'app'] as const).map((scope) => {
                       const active = newStaffInboxScope === scope
@@ -6127,11 +6130,11 @@ export default function DashboardPage() {
                           className={`rounded-xl border px-3 py-2.5 text-left transition ${
                             active
                               ? 'border-[#f5d040]/50 bg-[rgba(141,99,255,0.12)] ring-1 ring-[#f5d040]/40'
-                              : 'border-white/10 bg-[#0f1834] hover:border-white/20'
+                              : 'border-slate-200 bg-slate-50 hover:border-slate-300'
                           }`}
                         >
-                          <p className="text-[13px] font-semibold text-white">{supportScopeShortLabel(scope)}</p>
-                          <p className="text-[10px] text-[#8892b0] mt-0.5 leading-snug">{supportScopeLabel(scope)}</p>
+                          <p className="text-[13px] font-semibold text-slate-900">{supportScopeShortLabel(scope)}</p>
+                          <p className="text-[10px] text-slate-500 mt-0.5 leading-snug">{supportScopeLabel(scope)}</p>
                         </button>
                       )
                     })}
@@ -6139,7 +6142,7 @@ export default function DashboardPage() {
                 </div>
                 <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
                 <input
-                  className="rounded-xl border border-white/10 bg-[#0c1428] px-3 py-2.5 text-sm outline-none focus:border-[#6f54ff]/50"
+                  className="rounded-xl border border-slate-200 bg-slate-50 px-3 py-2.5 text-sm outline-none focus:border-[#6f54ff]/50"
                   placeholder="First name"
                   value={newStaffFirst}
                   onChange={(e) => setNewStaffFirst(e.target.value)}
@@ -6147,14 +6150,14 @@ export default function DashboardPage() {
                 />
                 <input
                   type="email"
-                  className="rounded-xl border border-white/10 bg-[#0c1428] px-3 py-2.5 text-sm outline-none focus:border-[#6f54ff]/50"
+                  className="rounded-xl border border-slate-200 bg-slate-50 px-3 py-2.5 text-sm outline-none focus:border-[#6f54ff]/50"
                   placeholder="Work email (their login)"
                   value={newStaffEmail}
                   onChange={(e) => setNewStaffEmail(e.target.value)}
                   autoComplete="off"
                 />
                 <input
-                  className="rounded-xl border border-white/10 bg-[#0c1428] px-3 py-2.5 text-sm outline-none focus:border-[#6f54ff]/50 sm:col-span-2"
+                  className="rounded-xl border border-slate-200 bg-slate-50 px-3 py-2.5 text-sm outline-none focus:border-[#6f54ff]/50 sm:col-span-2"
                   placeholder="Username · public @handle (e.g. alex_support)"
                   value={newStaffUsername}
                   onChange={(e) => setNewStaffUsername(e.target.value.replace(/\s+/g, '').replace(/^@+/, ''))}
@@ -6163,7 +6166,7 @@ export default function DashboardPage() {
                 <div className="relative sm:col-span-2">
                   <input
                     type={showNewStaffPassword ? 'text' : 'password'}
-                    className="w-full rounded-xl border border-white/10 bg-[#0c1428] px-3 py-2.5 pr-10 text-sm outline-none focus:border-[#6f54ff]/50"
+                    className="w-full rounded-xl border border-slate-200 bg-slate-50 px-3 py-2.5 pr-10 text-sm outline-none focus:border-[#6f54ff]/50"
                     placeholder="Password (min 8 characters)"
                     value={newStaffPassword}
                     onChange={(e) => setNewStaffPassword(e.target.value)}
@@ -6172,7 +6175,7 @@ export default function DashboardPage() {
                   <button
                     type="button"
                     onClick={() => setShowNewStaffPassword((v) => !v)}
-                    className="absolute right-3 top-1/2 -translate-y-1/2 text-[#6f7896] hover:text-white p-0.5"
+                    className="absolute right-3 top-1/2 -translate-y-1/2 text-[#6f7896] hover:text-slate-900 p-0.5"
                     aria-label={showNewStaffPassword ? 'Hide passwords' : 'Show passwords'}
                   >
                     {showNewStaffPassword ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
@@ -6181,7 +6184,7 @@ export default function DashboardPage() {
                 <div className="relative sm:col-span-2">
                   <input
                     type={showNewStaffPassword ? 'text' : 'password'}
-                    className="w-full rounded-xl border border-white/10 bg-[#0c1428] px-3 py-2.5 pr-10 text-sm outline-none focus:border-[#6f54ff]/50"
+                    className="w-full rounded-xl border border-slate-200 bg-slate-50 px-3 py-2.5 pr-10 text-sm outline-none focus:border-[#6f54ff]/50"
                     placeholder="Confirm password"
                     value={newStaffPasswordConfirm}
                     onChange={(e) => setNewStaffPasswordConfirm(e.target.value)}
@@ -6190,7 +6193,7 @@ export default function DashboardPage() {
                   <button
                     type="button"
                     onClick={() => setShowNewStaffPassword((v) => !v)}
-                    className="absolute right-3 top-1/2 -translate-y-1/2 text-[#6f7896] hover:text-white p-0.5"
+                    className="absolute right-3 top-1/2 -translate-y-1/2 text-[#6f7896] hover:text-slate-900 p-0.5"
                     aria-label={showNewStaffPassword ? 'Hide passwords' : 'Show passwords'}
                   >
                     {showNewStaffPassword ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
@@ -6209,19 +6212,19 @@ export default function DashboardPage() {
             </div>
             ) : null}
 
-            <div className="rounded-2xl border border-orange-500/20 bg-[rgba(11,18,40,0.9)] p-4 space-y-3">
+            <div className="rounded-2xl border border-orange-500/20 bg-white shadow-sm p-4 space-y-3">
               <div className="flex items-center gap-2">
                 <Wrench className="w-4 h-4 text-orange-300 shrink-0" aria-hidden />
-                <h3 className="text-sm font-semibold text-white">Add technical staff</h3>
+                <h3 className="text-sm font-semibold text-slate-900">Add technical staff</h3>
               </div>
-              <p className="text-[11px] text-[#8892b0]">
+              <p className="text-[11px] text-slate-500">
                 Technical agents use a <strong className="text-[#fdba74]">separate login</strong> at{' '}
                 <code className="text-[#fdba74]/90 text-[10px]">/login/technical</code> and only see the{' '}
                 <strong className="text-[#fdba74]">Technical Escalations</strong> inbox with full chat history. Up to 4 technical agents.
               </p>
               <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
                 <input
-                  className="rounded-xl border border-white/10 bg-[#0c1428] px-3 py-2.5 text-sm outline-none focus:border-[#f97316]/50"
+                  className="rounded-xl border border-slate-200 bg-slate-50 px-3 py-2.5 text-sm outline-none focus:border-[#f97316]/50"
                   placeholder="First name"
                   value={newTechFirst}
                   onChange={(e) => setNewTechFirst(e.target.value)}
@@ -6229,14 +6232,14 @@ export default function DashboardPage() {
                 />
                 <input
                   type="email"
-                  className="rounded-xl border border-white/10 bg-[#0c1428] px-3 py-2.5 text-sm outline-none focus:border-[#f97316]/50"
+                  className="rounded-xl border border-slate-200 bg-slate-50 px-3 py-2.5 text-sm outline-none focus:border-[#f97316]/50"
                   placeholder="Work email (their login)"
                   value={newTechEmail}
                   onChange={(e) => setNewTechEmail(e.target.value)}
                   autoComplete="off"
                 />
                 <input
-                  className="rounded-xl border border-white/10 bg-[#0c1428] px-3 py-2.5 text-sm outline-none focus:border-[#f97316]/50 sm:col-span-2"
+                  className="rounded-xl border border-slate-200 bg-slate-50 px-3 py-2.5 text-sm outline-none focus:border-[#f97316]/50 sm:col-span-2"
                   placeholder="Username · public @handle (e.g. tech_alex)"
                   value={newTechUsername}
                   onChange={(e) => setNewTechUsername(e.target.value.replace(/\s+/g, '').replace(/^@+/, ''))}
@@ -6245,7 +6248,7 @@ export default function DashboardPage() {
                 <div className="relative sm:col-span-2">
                   <input
                     type={showNewTechPassword ? 'text' : 'password'}
-                    className="w-full rounded-xl border border-white/10 bg-[#0c1428] px-3 py-2.5 pr-10 text-sm outline-none focus:border-[#f97316]/50"
+                    className="w-full rounded-xl border border-slate-200 bg-slate-50 px-3 py-2.5 pr-10 text-sm outline-none focus:border-[#f97316]/50"
                     placeholder="Password (min 8 characters)"
                     value={newTechPassword}
                     onChange={(e) => setNewTechPassword(e.target.value)}
@@ -6254,7 +6257,7 @@ export default function DashboardPage() {
                   <button
                     type="button"
                     onClick={() => setShowNewTechPassword((v) => !v)}
-                    className="absolute right-3 top-1/2 -translate-y-1/2 text-[#6f7896] hover:text-white p-0.5"
+                    className="absolute right-3 top-1/2 -translate-y-1/2 text-[#6f7896] hover:text-slate-900 p-0.5"
                     aria-label={showNewTechPassword ? 'Hide passwords' : 'Show passwords'}
                   >
                     {showNewTechPassword ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
@@ -6263,7 +6266,7 @@ export default function DashboardPage() {
                 <div className="relative sm:col-span-2">
                   <input
                     type={showNewTechPassword ? 'text' : 'password'}
-                    className="w-full rounded-xl border border-white/10 bg-[#0c1428] px-3 py-2.5 pr-10 text-sm outline-none focus:border-[#f97316]/50"
+                    className="w-full rounded-xl border border-slate-200 bg-slate-50 px-3 py-2.5 pr-10 text-sm outline-none focus:border-[#f97316]/50"
                     placeholder="Confirm password"
                     value={newTechPasswordConfirm}
                     onChange={(e) => setNewTechPasswordConfirm(e.target.value)}
@@ -6282,14 +6285,14 @@ export default function DashboardPage() {
               </button>
             </div>
 
-            <div className="rounded-2xl border border-white/[0.08] bg-[rgba(11,18,40,0.9)] overflow-hidden">
-              <div className="px-3 py-2 border-b border-white/[0.08] flex items-center justify-between gap-2">
-                <h3 className="text-[10px] font-bold uppercase tracking-[0.16em] text-[#8892b0]">Team roster</h3>
+            <div className="rounded-2xl border border-slate-200 bg-white shadow-sm overflow-hidden">
+              <div className="px-3 py-2 border-b border-slate-200 flex items-center justify-between gap-2">
+                <h3 className="text-[10px] font-bold uppercase tracking-[0.16em] text-slate-500">Team roster</h3>
                 {teamLoadBusy ? <Loader2 className="w-4 h-4 animate-spin text-[#f5d040]" /> : null}
               </div>
-              <div className="divide-y divide-white/[0.08]">
+              <div className="divide-y divide-slate-200">
                 {teamRows.length === 0 && !teamLoadBusy ? (
-                  <p className="px-3 py-5 text-[13px] text-[#8892b0]">No team rows loaded.</p>
+                  <p className="px-3 py-5 text-[13px] text-slate-500">No team rows loaded.</p>
                 ) : (
                   (['admin', 'support', 'technical'] as const).map((roleGroup) => {
                     const rows = teamRows.filter((r) => r.business_role === roleGroup)
@@ -6302,7 +6305,7 @@ export default function DashboardPage() {
                           : 'Technical staff'
                     return (
                       <div key={roleGroup}>
-                        <p className="px-3 py-2 text-[10px] font-bold uppercase tracking-[0.14em] text-[#5c647e] bg-[#0c1428]/60">
+                        <p className="px-3 py-2 text-[10px] font-bold uppercase tracking-[0.14em] text-slate-400 bg-slate-50">
                           {sectionTitle} ({rows.length})
                         </p>
                         {rows.map((row) => {
@@ -6316,8 +6319,8 @@ export default function DashboardPage() {
                     return (
                       <div key={row.id} className="flex flex-wrap items-center justify-between gap-3 px-3 py-3">
                         <div className="min-w-0 flex-1">
-                          <p className="font-medium text-white truncate">{label}</p>
-                          <p className="text-[12px] text-[#7d86a8] truncate">
+                          <p className="font-medium text-slate-900 truncate">{label}</p>
+                          <p className="text-[12px] text-slate-500 truncate">
                             @{row.username} ·{' '}
                             {row.business_role === 'admin'
                               ? 'Admin · All inboxes'
@@ -6327,12 +6330,12 @@ export default function DashboardPage() {
                             {removed ? <span className="text-red-300/90"> — removed</span> : null}
                           </p>
                           {isSupport && !removed ? (
-                            <p className="text-[11px] text-[#8892b0] mt-0.5">{supportScopeLabel(rowScope)}</p>
+                            <p className="text-[11px] text-slate-500 mt-0.5">{supportScopeLabel(rowScope)}</p>
                           ) : null}
                         </div>
                         {isAdmin && isSupport && !removed ? (
                           <div className="flex flex-wrap items-center gap-2 shrink-0">
-                            <label className="flex items-center gap-2 text-[11px] text-[#8892b0]">
+                            <label className="flex items-center gap-2 text-[11px] text-slate-500">
                               <span className="hidden sm:inline">Inbox</span>
                               <select
                                 value={rowScope}
@@ -6341,7 +6344,7 @@ export default function DashboardPage() {
                                   const next = parseSupportInboxScope(e.target.value)
                                   if (next && next !== rowScope) void updateStaffInboxScope(row.id, next)
                                 }}
-                                className="rounded-lg border border-white/10 bg-[#0c1428] px-2 py-1.5 text-[12px] text-white outline-none focus:border-[#6f54ff]/50 min-w-[120px]"
+                                className="rounded-lg border border-slate-200 bg-slate-50 px-2 py-1.5 text-[12px] text-slate-900 outline-none focus:border-[#6f54ff]/50 min-w-[120px]"
                                 aria-label={`Inbox assignment for ${label}`}
                               >
                                 <option value="both">Both inboxes</option>
@@ -6389,17 +6392,17 @@ export default function DashboardPage() {
 
         <StaffTabPanel tab="notify" activeTab={activeTab} mountedTabs={mountedTabs} render={() => (
           <section className="space-y-3 max-w-3xl">
-            <p className="text-[12px] text-[#8892b0] leading-relaxed">
-              Sends an <strong className="text-[#c4cbe6]">in-app notification</strong> and <strong className="text-[#c4cbe6]">email</strong> to each recipient (bell / Notifications screen).{' '}
-              This is <strong className="text-[#c4cbe6]">not</strong> SMS, email, or a DM in their support thread — only the notifications list.
+            <p className="text-[12px] text-slate-500 leading-relaxed">
+              Sends an <strong className="text-slate-600">in-app notification</strong> and <strong className="text-slate-600">email</strong> to each recipient (bell / Notifications screen).{' '}
+              This is <strong className="text-slate-600">not</strong> SMS, email, or a DM in their support thread — only the notifications list.
             </p>
-            <p className="text-[12px] text-[#8892b0] leading-relaxed">
-              <strong className="text-[#c4cbe6]">All</strong>: anyone who has messaged your business or follows you.{' '}
-              <strong className="text-[#c4cbe6]">Selected</strong>: pick from that same member list.{' '}
-              <strong className="text-[#c4cbe6]">Labels</strong>: approved customers with at least one conversation tagged with any label you pick.{' '}
-              <strong className="text-[#c4cbe6]">One user</strong>: username or UUID. Pending or suspended customers are always skipped.
+            <p className="text-[12px] text-slate-500 leading-relaxed">
+              <strong className="text-slate-600">All</strong>: anyone who has messaged your business or follows you.{' '}
+              <strong className="text-slate-600">Selected</strong>: pick from that same member list.{' '}
+              <strong className="text-slate-600">Labels</strong>: approved customers with at least one conversation tagged with any label you pick.{' '}
+              <strong className="text-slate-600">One user</strong>: username or UUID. Pending or suspended customers are always skipped.
             </p>
-            <div className="rounded-2xl border border-white/[0.08] bg-[rgba(11,18,40,0.9)] p-3 space-y-3">
+            <div className="rounded-2xl border border-slate-200 bg-white shadow-sm p-3 space-y-3">
               <div className="grid grid-cols-3 gap-2">
                 {(['announcement', 'alert', 'update'] as const).map((opt) => (
                   <button
@@ -6408,31 +6411,31 @@ export default function DashboardPage() {
                     onClick={() => setAnnouncementType(opt)}
                     className={`rounded-xl py-2.5 border capitalize text-[13px] ${
                       announcementType === opt
-                        ? 'border-[#6f54ff] bg-[#211a47] text-white'
-                        : 'border-white/10 bg-[#111a31] text-[#7d86a8]'
+                        ? 'border-[#6f54ff] bg-[#211a47] text-slate-900'
+                        : 'border-slate-200 bg-slate-50 text-slate-500'
                     }`}
                   >
                     {opt}
                   </button>
                 ))}
               </div>
-              <div className="rounded-xl border border-white/10 divide-y divide-white/10 overflow-hidden bg-[#111a31]">
+              <div className="rounded-xl border border-slate-200 divide-y divide-slate-200 overflow-hidden bg-slate-50">
                 <AudienceRow label="All (thread + followers)" selected={audience === 'all'} onClick={() => setAudience('all')} />
                 <AudienceRow label="Selected users" selected={audience === 'selected'} onClick={() => setAudience('selected')} />
                 <AudienceRow label="Users with inbox labels" selected={audience === 'labels'} onClick={() => setAudience('labels')} />
                 <AudienceRow label="One user" selected={audience === 'one'} onClick={() => setAudience('one')} />
               </div>
               {audience === 'labels' ? (
-                <div className="rounded-xl border border-white/10 bg-[#111a31] p-2 space-y-1">
-                  <p className="text-[11px] text-[#8892b0] px-1.5 pt-0.5">
+                <div className="rounded-xl border border-slate-200 bg-slate-50 p-2 space-y-1">
+                  <p className="text-[11px] text-slate-500 px-1.5 pt-0.5">
                     Tick one or more labels. Anyone with a tagged thread for your business (any of these labels) gets the notification.
                   </p>
-                  <p className="text-[11px] text-[#c4cbe6] px-1.5 pb-1 tabular-nums">
+                  <p className="text-[11px] text-slate-600 px-1.5 pb-1 tabular-nums">
                     {notifyAudienceLabelIds.length} label{notifyAudienceLabelIds.length === 1 ? '' : 's'} selected
                   </p>
                   <div className="max-h-56 overflow-y-auto space-y-1">
                     {inboxLabelCatalog.length === 0 ? (
-                      <p className="text-xs text-[#7d86a8] px-2 py-3">
+                      <p className="text-xs text-slate-500 px-2 py-3">
                         No labels defined yet. Add labels from the Inbox tab (requires migration 013), then choose who has those tags on a thread.
                       </p>
                     ) : (
@@ -6445,8 +6448,8 @@ export default function DashboardPage() {
                             onClick={() => toggleNotifyAudienceLabel(lbl.id)}
                             className={`w-full text-left rounded-lg border px-3 py-2.5 transition-colors flex items-start gap-3 ${
                               selected
-                                ? 'border-[#6f54ff] bg-[#221c4a] text-white'
-                                : 'border-white/10 bg-[#151d39] text-[#aeb7d6] hover:border-white/20'
+                                ? 'border-[#6f54ff] bg-[#221c4a] text-slate-900'
+                                : 'border-slate-200 bg-slate-50 text-slate-500 hover:border-slate-300'
                             }`}
                           >
                             <SelectionCheckbox checked={selected} />
@@ -6458,7 +6461,7 @@ export default function DashboardPage() {
                             <span className="min-w-0 flex-1">
                               <span className="text-sm font-medium truncate block">{lbl.name}</span>
                               {lbl.is_system ? (
-                                <span className="text-[10px] text-[#5c647e]">preset</span>
+                                <span className="text-[10px] text-slate-400">preset</span>
                               ) : null}
                             </span>
                           </button>
@@ -6469,22 +6472,22 @@ export default function DashboardPage() {
                 </div>
               ) : null}
               {audience === 'selected' ? (
-                <div className="rounded-xl border border-white/10 bg-[#111a31] p-2 space-y-2">
-                  <p className="text-[11px] text-[#8892b0] px-1.5">
-                    Same people as <strong className="text-[#c4cbe6]">Users ? Active</strong>: approved customers who follow you or have a support
+                <div className="rounded-xl border border-slate-200 bg-slate-50 p-2 space-y-2">
+                  <p className="text-[11px] text-slate-500 px-1.5">
+                    Same people as <strong className="text-slate-600">Users ? Active</strong>: approved customers who follow you or have a support
                     thread. Tap rows to toggle, or use Select all / Clear.
                   </p>
                   {selectableRecipients.length === 0 ? (
-                    <p className="text-xs text-[#7d86a8] px-2 py-3">
+                    <p className="text-xs text-slate-500 px-2 py-3">
                       No selectable members yet. Members appear after they follow your business or open a support thread.
                     </p>
                   ) : (
                     <>
                       <div className="relative">
-                        <Search className="pointer-events-none absolute left-2.5 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-[#5c647e]" aria-hidden />
+                        <Search className="pointer-events-none absolute left-2.5 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-slate-400" aria-hidden />
                         <input
                           type="search"
-                          className="w-full rounded-lg border border-white/10 bg-[#0c1428] py-2 pl-8 pr-2 text-[12px] text-[#e2e6f5] outline-none focus:border-[#6f54ff]/50"
+                          className="w-full rounded-lg border border-slate-200 bg-slate-50 py-2 pl-8 pr-2 text-[12px] text-slate-800 outline-none focus:border-[#6f54ff]/50"
                           placeholder="Search by name, @username, or email..."
                           value={notifyRecipientQuery}
                           onChange={(e) => setNotifyRecipientQuery(e.target.value)}
@@ -6495,7 +6498,7 @@ export default function DashboardPage() {
                         <button
                           type="button"
                           onClick={selectAllNotifyRecipients}
-                          className="rounded-lg border border-white/15 bg-white/[0.06] px-2.5 py-1.5 text-[11px] font-semibold text-[#c4cbe6] hover:bg-white/[0.1]"
+                          className="rounded-lg border border-slate-300 bg-white/[0.06] px-2.5 py-1.5 text-[11px] font-semibold text-slate-600 hover:bg-white/[0.1]"
                         >
                           Select all ({selectableRecipients.length})
                         </button>
@@ -6503,7 +6506,7 @@ export default function DashboardPage() {
                           type="button"
                           onClick={clearNotifyRecipients}
                           disabled={selectedRecipientIds.length === 0}
-                          className="rounded-lg border border-white/15 px-2.5 py-1.5 text-[11px] font-semibold text-[#8892b0] hover:text-white hover:bg-white/[0.06] disabled:opacity-40"
+                          className="rounded-lg border border-slate-300 px-2.5 py-1.5 text-[11px] font-semibold text-slate-500 hover:text-slate-900 hover:bg-slate-100 disabled:opacity-40"
                         >
                           Clear
                         </button>
@@ -6516,25 +6519,25 @@ export default function DashboardPage() {
                             Add shown ({filteredSelectableRecipients.length})
                           </button>
                         ) : null}
-                        <span className="text-[11px] text-[#c4cbe6] tabular-nums ml-auto">
+                        <span className="text-[11px] text-slate-600 tabular-nums ml-auto">
                           {selectedRecipientIds.length} selected
                         </span>
                       </div>
                       {notifySearchBusy ? (
-                        <p className="text-[10px] text-[#8892b0] px-0.5 flex items-center gap-1.5">
+                        <p className="text-[10px] text-slate-500 px-0.5 flex items-center gap-1.5">
                           <Loader2 className="w-3 h-3 animate-spin" aria-hidden />
                           Searching...
                         </p>
                       ) : null}
                       {notifyRecipientQuery.trim() && !notifySearchBusy ? (
-                        <p className="text-[10px] text-[#5c647e] px-0.5">
+                        <p className="text-[10px] text-slate-400 px-0.5">
                           {filteredSelectableRecipients.length} match{filteredSelectableRecipients.length === 1 ? '' : 'es'} for your search
                           {filteredSelectableRecipients.length === 0 ? ' — try @username or full email' : ''}
                         </p>
                       ) : null}
                       <div className="max-h-56 overflow-y-auto space-y-1">
                         {filteredSelectableRecipients.length === 0 ? (
-                          <p className="text-xs text-[#7d86a8] px-2 py-3 text-center">No members match your search.</p>
+                          <p className="text-xs text-slate-500 px-2 py-3 text-center">No members match your search.</p>
                         ) : (
                           filteredSelectableRecipients.map((member) => {
                             const label = `${member.first_name ?? ''} ${member.last_name ?? ''}`.trim() || member.username
@@ -6546,16 +6549,16 @@ export default function DashboardPage() {
                                 onClick={() => toggleSelectedRecipient(member.id)}
                                 className={`w-full text-left rounded-lg border px-3 py-2.5 transition-colors flex items-start gap-3 ${
                                   selected
-                                    ? 'border-[#6f54ff] bg-[#221c4a] text-white'
-                                    : 'border-white/10 bg-[#151d39] text-[#aeb7d6] hover:border-white/20'
+                                    ? 'border-[#6f54ff] bg-[#221c4a] text-slate-900'
+                                    : 'border-slate-200 bg-slate-50 text-slate-500 hover:border-slate-300'
                                 }`}
                               >
                                 <SelectionCheckbox checked={selected} />
                                 <span className="min-w-0 flex-1">
                                   <span className="text-sm font-medium truncate block">{label}</span>
-                                  <span className="text-xs text-[#7d86a8] truncate block">@{member.username}</span>
+                                  <span className="text-xs text-slate-500 truncate block">@{member.username}</span>
                                   {member.email ? (
-                                    <span className="text-[10px] text-[#5c647e] truncate block">{member.email}</span>
+                                    <span className="text-[10px] text-slate-400 truncate block">{member.email}</span>
                                   ) : null}
                                 </span>
                               </button>
@@ -6569,20 +6572,20 @@ export default function DashboardPage() {
               ) : null}
               {audience === 'one' ? (
                 <input
-                  className="w-full bg-[#111a31] border border-white/10 rounded-xl px-3 py-2.5 text-sm outline-none focus:border-[#6f54ff]"
+                  className="w-full bg-slate-50 border border-slate-200 rounded-xl px-3 py-2.5 text-sm outline-none focus:border-[#6f54ff]"
                   placeholder="Username, email, or user UUID"
                   value={oneUserQuery}
                   onChange={(e) => setOneUserQuery(e.target.value)}
                 />
               ) : null}
               <input
-                className="w-full bg-[#111a31] border border-white/10 rounded-xl px-3 py-2.5 text-sm outline-none focus:border-[#6f54ff]"
+                className="w-full bg-slate-50 border border-slate-200 rounded-xl px-3 py-2.5 text-sm outline-none focus:border-[#6f54ff]"
                 placeholder="Title"
                 value={notifyTitle}
                 onChange={(e) => setNotifyTitle(e.target.value)}
               />
               <textarea
-                className="w-full bg-[#111a31] border border-white/10 rounded-xl px-3 py-2.5 text-sm outline-none focus:border-[#6f54ff] min-h-24"
+                className="w-full bg-slate-50 border border-slate-200 rounded-xl px-3 py-2.5 text-sm outline-none focus:border-[#6f54ff] min-h-24"
                 placeholder="Message"
                 value={notifyBody}
                 onChange={(e) => setNotifyBody(e.target.value)}
@@ -6608,17 +6611,17 @@ export default function DashboardPage() {
         <StaffTabPanel tab="reports" activeTab={activeTab} mountedTabs={mountedTabs} render={() => (
           <section className="space-y-3">
             {reports.length === 0 ? (
-              <p className="text-sm text-[#7d86a8]">No reports for this business.</p>
+              <p className="text-sm text-slate-500">No reports for this business.</p>
             ) : (
               <div className="space-y-2.5">
                 {reports.map((report) => (
-                  <article key={report.id} className="rounded-2xl border border-white/10 bg-[#0e1528]/90 p-3 shadow-[0_20px_50px_-35px_rgba(30,49,112,0.95)]">
+                  <article key={report.id} className="rounded-2xl border border-slate-200 bg-white p-3 shadow-sm">
                     <div className="flex items-center justify-between gap-3">
                       <p className="font-semibold">{report.name}</p>
                       <StatusPill status={report.status} />
                     </div>
-                    <p className="text-sm text-[#73a9ff] mt-2">{report.type}</p>
-                    <p className="text-[#7d86a8] mt-1">{report.details}</p>
+                    <p className="text-sm text-blue-600 mt-2">{report.type}</p>
+                    <p className="text-slate-500 mt-1">{report.details}</p>
                     <div className="mt-3 flex flex-wrap gap-2">
                       {(['new', 'in_review', 'resolved'] as const).map((nextStatus) => (
                         <button
@@ -6628,8 +6631,8 @@ export default function DashboardPage() {
                           onClick={() => void updateReportStatus(report.id, nextStatus)}
                           className={`rounded-lg border px-2.5 py-1.5 text-xs capitalize transition-colors disabled:opacity-40 ${
                             report.status === nextStatus
-                              ? 'border-[#7e66ff] bg-[#221c4a] text-white'
-                              : 'border-white/15 text-[#9ea8cc] hover:text-white hover:border-white/30'
+                              ? 'border-[#7e66ff] bg-[#221c4a] text-slate-900'
+                              : 'border-slate-300 text-slate-500 hover:text-slate-900 hover:border-slate-300'
                           }`}
                         >
                           {nextStatus === 'in_review' ? 'In review' : nextStatus}
@@ -6646,10 +6649,10 @@ export default function DashboardPage() {
         </div>
         <footer className="admin-footer hidden lg:flex shrink-0">
           <span>
-            <span className="text-[#8892b0] font-semibold">{businessInfo?.name || 'Juwa2 Support'}</span> Staff Console
+            <span className="text-slate-500 font-semibold">{businessInfo?.name || 'Juwa2 Support'}</span> Staff Console
           </span>
           <span>
-            {new Date().getFullYear()} &copy; All rights reserved. <span className="text-[#8892b0]">v{APP_VERSION}</span>
+            {new Date().getFullYear()} &copy; All rights reserved. <span className="text-slate-400">v{APP_VERSION}</span>
           </span>
         </footer>
       </main>
@@ -6799,13 +6802,13 @@ function StatCard({
           ? 'bg-[rgba(255,59,92,0.1)] text-[#ff3b5c]'
           : 'bg-[rgba(47,209,127,0.1)] text-[#2fd17f]'
   return (
-    <div className="rounded-2xl border border-white/[0.08] bg-[rgba(11,18,40,0.9)] p-3 flex items-center gap-2">
-      <div className={`w-8 h-8 rounded-[10px] flex items-center justify-center shrink-0 [&_svg]:stroke-current ${iconWrap}`}>
+    <div className="rounded-2xl border border-slate-200 bg-white shadow-sm p-3.5 flex items-center gap-3">
+      <div className={`w-9 h-9 rounded-xl flex items-center justify-center shrink-0 [&_svg]:stroke-current ${iconWrap}`}>
         {icon}
       </div>
       <div className="min-w-0">
-        <p className="text-[20px] font-bold leading-none text-white tabular-nums">{value}</p>
-        <p className="text-[11px] text-[#8892b0] mt-0.5">{label}</p>
+        <p className="text-[22px] font-bold leading-none text-slate-900 tabular-nums tracking-tight">{value}</p>
+        <p className="text-[12px] text-slate-500 mt-1 font-medium">{label}</p>
       </div>
     </div>
   )
@@ -6826,10 +6829,10 @@ function QuickButton({
     <button
       type="button"
       onClick={onClick}
-      className="rounded-2xl border border-white/[0.08] bg-[rgba(11,18,40,0.9)] px-3 py-2.5 flex items-center justify-center gap-2 text-[12px] font-semibold text-[#c4cbe6] hover:text-white hover:border-[rgba(141,99,255,0.3)] hover:bg-[rgba(141,99,255,0.06)] transition-all relative [&_svg]:text-[#f5d040] [&_svg]:w-[15px] [&_svg]:h-[15px]"
+      className="rounded-2xl border border-slate-200 bg-white shadow-sm px-3.5 py-3 flex items-center justify-center gap-2 text-[13px] font-semibold text-slate-700 hover:text-slate-900 hover:border-violet-300 hover:bg-violet-50/60 transition-all relative [&_svg]:text-[#d4af37] [&_svg]:w-[15px] [&_svg]:h-[15px]"
     >
       {typeof badgeCount === 'number' && badgeCount > 0 ? (
-        <span className="absolute -top-1.5 -right-1.5 min-w-[18px] h-[18px] px-1 rounded-full bg-[#f5d040] text-white text-[9px] font-bold flex items-center justify-center tabular-nums border-2 border-[#000000]">
+        <span className="absolute -top-1.5 -right-1.5 min-w-[18px] h-[18px] px-1 rounded-full bg-[#f5d040] text-slate-900 text-[9px] font-bold flex items-center justify-center tabular-nums border-2 border-white">
           {badgeCount > 99 ? '99+' : badgeCount}
         </span>
       ) : null}
@@ -6843,11 +6846,11 @@ function SelectionCheckbox({ checked }: { checked: boolean }) {
   return (
     <span
       className={`mt-0.5 shrink-0 w-[18px] h-[18px] rounded-[4px] border-2 flex items-center justify-center ${
-        checked ? 'border-[#a78bfa] bg-[#6f54ff]/35' : 'border-white/30 bg-[#0a1020]'
+        checked ? 'border-violet-500 bg-violet-100' : 'border-slate-300 bg-white'
       }`}
       aria-hidden
     >
-      {checked ? <Check className="w-3.5 h-3.5 text-[#ede9fe]" strokeWidth={3} /> : null}
+      {checked ? <Check className="w-3.5 h-3.5 text-violet-700" strokeWidth={3} /> : null}
     </span>
   )
 }

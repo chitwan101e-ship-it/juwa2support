@@ -239,3 +239,154 @@ textarea {
 .admin-footer a:hover {
   color: #c4cbe6;
 }
+
+/* -------------------------------------------------------------------------- */
+/* Admin main content — light workspace (sidebar + header stay dark)          */
+/* -------------------------------------------------------------------------- */
+
+.admin-main-content {
+  --admin-content-bg: #ffffff;
+  --admin-content-surface: #ffffff;
+  --admin-content-surface-muted: #f8fafc;
+  --admin-content-input: #f1f5f9;
+  --admin-content-text: #0f172a;
+  --admin-content-text-secondary: #475569;
+  --admin-content-text-muted: #64748b;
+  --admin-content-text-subtle: #94a3b8;
+  --admin-content-border: #e2e8f0;
+  --admin-content-border-strong: #cbd5e1;
+  --admin-content-hover: #f1f5f9;
+  --admin-content-shadow: 0 1px 3px 0 rgb(15 23 42 / 0.06), 0 1px 2px -1px rgb(15 23 42 / 0.06);
+
+  background-color: var(--admin-content-bg);
+  color: var(--admin-content-text);
+  font-family: var(--font-juwa2-footer), 'Inter', ui-sans-serif, system-ui, sans-serif;
+  font-size: 14px;
+  line-height: 1.55;
+  letter-spacing: -0.011em;
+  font-feature-settings: 'cv02', 'cv03', 'cv04', 'cv11';
+  -webkit-font-smoothing: antialiased;
+  text-rendering: optimizeLegibility;
+}
+
+.admin-main-content .admin-card {
+  background: var(--admin-content-surface);
+  border-color: var(--admin-content-border);
+  box-shadow: var(--admin-content-shadow);
+}
+
+.admin-main-content .admin-card-header {
+  border-bottom-color: var(--admin-content-border);
+}
+
+.admin-main-content .admin-card-title {
+  color: var(--admin-content-text);
+  font-size: 15px;
+  font-weight: 700;
+  letter-spacing: -0.02em;
+}
+
+.admin-main-content .admin-content-header h1,
+.admin-main-content .admin-content-header h2,
+.admin-main-content .admin-content-header h3 {
+  color: var(--admin-content-text);
+  letter-spacing: -0.025em;
+}
+
+.admin-main-content .admin-breadcrumb {
+  color: var(--admin-content-text-muted);
+}
+
+.admin-main-content .admin-breadcrumb a:hover {
+  color: var(--admin-content-text-secondary);
+}
+
+.admin-main-content .admin-breadcrumb .sep {
+  color: var(--admin-content-text-subtle);
+}
+
+.admin-main-content .admin-breadcrumb .current {
+  color: var(--admin-content-text-secondary);
+}
+
+.admin-main-content .admin-footer {
+  background: var(--admin-content-bg);
+  border-top-color: var(--admin-content-border);
+  color: var(--admin-content-text-muted);
+}
+
+.admin-main-content .admin-footer a:hover {
+  color: var(--admin-content-text-secondary);
+}
+
+.admin-main-content .admin-surface-card {
+  background: var(--admin-content-surface);
+  border: 1px solid var(--admin-content-border);
+  border-radius: 14px;
+  box-shadow: var(--admin-content-shadow);
+}
+
+.admin-main-content .admin-surface-input {
+  background: var(--admin-content-input);
+  border: 1px solid var(--admin-content-border);
+  color: var(--admin-content-text);
+}
+
+.admin-main-content .admin-surface-input::placeholder {
+  color: var(--admin-content-text-subtle);
+}
+
+.admin-main-content .admin-text-heading {
+  color: var(--admin-content-text);
+  font-weight: 700;
+  letter-spacing: -0.02em;
+}
+
+.admin-main-content .admin-text-muted {
+  color: var(--admin-content-text-muted);
+}
+
+.admin-main-content .admin-text-secondary {
+  color: var(--admin-content-text-secondary);
+}
+
+.admin-main-content .admin-divider {
+  border-color: var(--admin-content-border);
+}
+
+/* Inbox panel + chat layout */
+.admin-inbox-panel {
+  flex: 1 1 auto;
+  min-height: 0;
+}
+
+.admin-inbox-panel > * {
+  min-height: 0;
+}
+
+.admin-inbox-chat {
+  display: grid;
+  grid-template-rows: auto 1fr auto;
+  min-height: 0;
+  height: 100%;
+  overflow: hidden;
+}
+
+.admin-inbox-chat-top {
+  grid-row: 1;
+  min-height: 0;
+}
+
+.admin-inbox-chat-messages {
+  grid-row: 2;
+  min-height: 0;
+  overflow-x: hidden;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  -webkit-overflow-scrolling: touch;
+}
+
+.admin-inbox-chat-composer {
+  grid-row: 3;
+  min-height: 0;
+}

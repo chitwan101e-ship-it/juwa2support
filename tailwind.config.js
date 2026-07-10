@@ -24,7 +24,8 @@ module.exports = {
         },
       },
       fontFamily: {
-        display: ['Inter', 'system-ui', 'sans-serif'],
+        sans: ['var(--font-juwa2-footer)', 'Inter', 'system-ui', 'sans-serif'],
+        display: ['var(--font-juwa2-footer)', 'Inter', 'system-ui', 'sans-serif'],
       },
       backgroundImage: {
         'juwa2-gradient': 'linear-gradient(135deg, #f5d040 0%, #d4af37 45%, #b8860b 100%)',
