@@ -7,8 +7,11 @@ export const runtime = 'nodejs'
 const AUTH_LOOKUP_MS = 12_000
 const BATCH = 8
 
-export async function GET() {
+export async function GET(req: Request) {
   try {
+    const url = new URL(req.url)
+    const countOnly = url.searchParams.get('countOnly') === '1'
+
     if (!process.env.SUPABASE_SERVICE_ROLE_KEY?.trim()) {
       return NextResponse.json(
         { error: 'SUPABASE_SERVICE_ROLE_KEY is not set on the server.' },
@@ -46,6 +49,24 @@ export async function GET() {
     }
 
     const admin = createServiceClient()
+
+    if (countOnly) {
+      const { count, error: countErr } = await withTimeout(
+        admin
+          .from('profiles')
+          .select('id', { count: 'exact', head: true })
+          .eq('role', 'customer')
+          .eq('account_status', 'pending')
+          .is('deleted_at', null),
+        15_000,
+        'Counting pending profiles timed out.'
+      )
+      if (countErr) {
+        return NextResponse.json({ error: countErr.message }, { status: 500 })
+      }
+      return NextResponse.json({ count: count ?? 0 })
+    }
+
     const { data: profiles, error: profErr } = await withTimeout(
       admin
         .from('profiles')

@@ -19,6 +19,7 @@
 --    12) Run  9b_technical_escalation_label_access.sql  (technical inbox sees labeled threads)
 --    13) Run  10_message_update_touch_conversation.sql  (inbox ordering on read receipts)
 --    14) Run  11_chat_replies_and_staff_notes.sql  (reply-to messages + game username note)
+    15) Run  12_performance_indexes.sql  (inbox unread RPC + performance indexes)
 --
 --   SCENARIO B — Bootstrap already ran; "already exists" / policy errors
 --     Run 3_extras.sql, 5_game_sso.sql, and 6_auto_approve_customers.sql as needed  (safe to re-run)

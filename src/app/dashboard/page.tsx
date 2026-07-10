@@ -1,6 +1,6 @@
 ﻿'use client'
 
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState, startTransition } from 'react'
 import type { ChangeEvent, ComponentType, CSSProperties, ReactNode } from 'react'
 import { useRouter } from 'next/navigation'
 import Link from 'next/link'
@@ -86,6 +86,13 @@ import {
   type SupportInboxScope,
 } from '@/lib/supportInboxScope'
 import { isChatComposerSubmitKey } from '@/lib/chatComposerKeyboard'
+import {
+  fetchAllBusinessConversations,
+  fetchInboxUnreadCounts,
+  INBOX_LIST_DEFAULT_MAX,
+} from '@/lib/staffInbox'
+import { listBusinessMemberProfiles } from '@/lib/resolveCustomerRecipient'
+import { StaffMultiTabPanel, StaffTabPanel, StaffUsersSubPanel } from '@/components/StaffTabPanel'
 
 type AppTab = 'home' | 'post' | InboxChannelTab | 'inbox-technical' | 'users' | 'notify' | 'reports' | 'team'
 type UsersPanelTab = 'pending' | 'active' | 'suspended'
@@ -152,8 +159,45 @@ type ThreadMessage = {
 const THREAD_MESSAGE_SELECT =
   'id, sender_id, body, created_at, image_url, read, read_at, is_internal, reply_to_message_id, profiles ( username, first_name, last_name, business_role ), reply_to:messages!reply_to_message_id ( id, body, sender_id, image_url, profiles ( username, first_name, last_name, business_role ) )'
 
+type RefreshScope = 'full' | 'light' | 'inbox' | 'users'
+
+const DASH_CACHE_TTL_MS = 10 * 60_000
+
+type DashSessionCache = {
+  at: number
+  convoList: ConvoListItem[]
+  activeMembers: ActiveMember[]
+  suspendedMembers: ActiveMember[]
+  pendingCustomers: PendingCustomer[]
+  pendingSignupCount: number
+}
+
+function dashCacheKey(businessId: string) {
+  return `juwa2-staff-dash-${businessId}`
+}
+
+function readDashCache(businessId: string): DashSessionCache | null {
+  try {
+    const raw = sessionStorage.getItem(dashCacheKey(businessId))
+    if (!raw) return null
+    const parsed = JSON.parse(raw) as DashSessionCache
+    if (!parsed?.at || Date.now() - parsed.at > DASH_CACHE_TTL_MS) return null
+    return parsed
+  } catch {
+    return null
+  }
+}
+
+function writeDashCache(businessId: string, data: Omit<DashSessionCache, 'at'>) {
+  try {
+    sessionStorage.setItem(dashCacheKey(businessId), JSON.stringify({ ...data, at: Date.now() }))
+  } catch {
+    /* quota / private mode */
+  }
+}
+
 /** Inbox shows the N most recently updated threads (not expired — older threads drop off when volume is high). */
-const INBOX_THREAD_LIMIT = 500
+const INBOX_THREAD_LIMIT = INBOX_LIST_DEFAULT_MAX
 /** PostgREST `.in()` filters are sent on the URL; chunk to stay under proxy length limits. */
 const PROFILE_ID_IN_CHUNK = 200
 
@@ -432,6 +476,7 @@ export default function DashboardPage() {
   const [activeTab, setActiveTab] = useState<AppTab>('home')
   const activeTabRef = useRef<AppTab>('home')
   activeTabRef.current = activeTab
+  const [mountedTabs, setMountedTabs] = useState<ReadonlySet<AppTab>>(() => new Set(['home']))
   const [sidebarCollapsed, setSidebarCollapsed] = useState(false)
 
   const [convoList, setConvoList] = useState<ConvoListItem[]>([])
@@ -479,6 +524,9 @@ export default function DashboardPage() {
   const [replyPendingImage, setReplyPendingImage] = useState<{ blob: Blob; previewUrl: string } | null>(null)
 
   const [pendingCustomers, setPendingCustomers] = useState<PendingCustomer[]>([])
+  const pendingCustomersRef = useRef<PendingCustomer[]>([])
+  pendingCustomersRef.current = pendingCustomers
+  const [pendingSignupCount, setPendingSignupCount] = useState(0)
   const [reviewBusyId, setReviewBusyId] = useState<string | null>(null)
 
   const [reports, setReports] = useState<ReportItem[]>([])
@@ -548,7 +596,11 @@ export default function DashboardPage() {
   const [loadError, setLoadError] = useState<string | null>(null)
   const [businessInfo, setBusinessInfo] = useState<{ name: string; slug: string } | null>(null)
   const [activeMembers, setActiveMembers] = useState<ActiveMember[]>([])
+  const activeMembersRef = useRef<ActiveMember[]>([])
+  activeMembersRef.current = activeMembers
   const [suspendedMembers, setSuspendedMembers] = useState<ActiveMember[]>([])
+  const suspendedMembersRef = useRef<ActiveMember[]>([])
+  suspendedMembersRef.current = suspendedMembers
   const [usersPanelTab, setUsersPanelTab] = useState<UsersPanelTab>('pending')
   const [modBusyId, setModBusyId] = useState<string | null>(null)
   const [removeCustomerBusyId, setRemoveCustomerBusyId] = useState<string | null>(null)
@@ -567,6 +619,9 @@ export default function DashboardPage() {
   } | null>(null)
   const [activeMemberLookupBusy, setActiveMemberLookupBusy] = useState(false)
   const [dashRefreshing, setDashRefreshing] = useState(false)
+  const [inboxLoading, setInboxLoading] = useState(false)
+  const [usersLoading, setUsersLoading] = useState(false)
+  const [usersRefreshing, setUsersRefreshing] = useState(false)
   const [inboxContactOpen, setInboxContactOpen] = useState(false)
   const [staffNotifyUnread, setStaffNotifyUnread] = useState(0)
   const [inboxRefreshing, setInboxRefreshing] = useState(false)
@@ -637,6 +692,12 @@ export default function DashboardPage() {
   const profileRef = useRef<ProfileRow | null>(null)
   profileRef.current = profile
 
+  const scopeInflightRef = useRef<Partial<Record<RefreshScope, boolean>>>({})
+  const scopeLoadedAtRef = useRef<Partial<Record<RefreshScope, number>>>({})
+  const refreshDashboardRef = useRef<
+    (p: ProfileRow, opts?: { scope?: RefreshScope; pendingDetail?: boolean; force?: boolean }) => Promise<void>
+  >(async () => {})
+
   const scrollThreadToLatest = useCallback((behavior: ScrollBehavior = 'auto') => {
     const el = threadScrollRef.current
     if (!el) return
@@ -694,7 +755,23 @@ export default function DashboardPage() {
   }, [supabase])
 
   const refreshDashboard = useCallback(
-    async (p: ProfileRow) => {
+    async (
+      p: ProfileRow,
+      opts?: { scope?: RefreshScope; pendingDetail?: boolean; force?: boolean }
+    ) => {
+      const scope = opts?.scope ?? 'full'
+      if (scopeInflightRef.current[scope] && !opts?.force) return
+
+      scopeInflightRef.current[scope] = true
+
+      const wantInbox = scope === 'full' || scope === 'inbox'
+      const wantMembers = scope === 'full' || scope === 'users'
+      const wantCanned = scope === 'full' || scope === 'inbox'
+      const wantReports = scope === 'full' || scope === 'light'
+      const wantBell = scope === 'full' || scope === 'light'
+      const wantPendingDetail =
+        opts?.pendingDetail ?? (scope === 'users' || activeTabRef.current === 'users')
+
       setLoadError(null)
       if (!p.business_id) {
         setLoadError('Staff profile is missing business_id. Fix it in Supabase public.profiles for your admin user.')
@@ -703,334 +780,388 @@ export default function DashboardPage() {
         setInboxLabelCatalog([])
         setCannedReplies([])
         setPendingCustomers([])
+        setPendingSignupCount(0)
         setActiveMembers([])
         setSuspendedMembers([])
         setReports([])
+        scopeInflightRef.current[scope] = false
         return
       }
 
       const bid = p.business_id
 
-      const { data: bizRow } = await supabase.from('businesses').select('name, slug').eq('id', bid).maybeSingle()
-      setBusinessInfo(bizRow ? { name: bizRow.name, slug: bizRow.slug } : null)
+      const hasUsersCache =
+        activeMembersRef.current.length > 0 ||
+        suspendedMembersRef.current.length > 0 ||
+        pendingCustomersRef.current.length > 0
+      if (wantInbox && convoListRef.current.length === 0) setInboxLoading(true)
+      if (wantInbox && convoListRef.current.length > 0) setInboxRefreshing(true)
+      if (wantMembers && !hasUsersCache) setUsersLoading(true)
+      if (wantMembers && hasUsersCache) setUsersRefreshing(true)
 
-      const pendingFetch: Promise<{ pending?: PendingCustomer[]; error?: string }> = fetch(
-        '/api/staff/pending-signups',
-        { method: 'GET', cache: 'no-store' }
-      )
-        .then(async (r) => {
-          const j = (await r.json().catch(() => ({}))) as { pending?: PendingCustomer[]; error?: string }
-          if (!r.ok) return { error: j.error || `HTTP ${r.status}` }
-          return { pending: j.pending ?? [] }
-        })
-        .catch((e: unknown) => {
-          const raw = e instanceof Error ? e.message : 'Network error'
-          const isOffline =
-            e instanceof TypeError &&
-            (raw === 'Failed to fetch' || raw === 'Load failed' || raw === 'NetworkError when attempting to fetch resource.')
-          return {
-            error: isOffline
-              ? 'Could not reach the app server for pending signups (often: dev server stopped, tab offline, or request blocked). Try Refresh after confirming npm run dev is running.'
-              : raw,
-          }
-        })
+      try {
+        if (scope === 'full' || scope === 'light' || wantInbox || wantMembers) {
+          const { data: bizRow } = await supabase.from('businesses').select('name, slug').eq('id', bid).maybeSingle()
+          setBusinessInfo(bizRow ? { name: bizRow.name, slug: bizRow.slug } : null)
+        }
 
-      const [convRes, pendingRes, reportRes, convCustRes, followRes, cannedRes] = await Promise.all([
-        supabase
-          .from('conversations')
-          .select('id, customer_id, updated_at, staff_game_username')
-          .eq('business_id', bid)
-          .order('updated_at', { ascending: false })
-          .limit(INBOX_THREAD_LIMIT),
-        pendingFetch,
-        supabase
-          .from('admin_reports')
-          .select('id, reporter_name, category, status, details, created_at')
-          .eq('business_id', bid)
-          .order('created_at', { ascending: false })
-          .limit(20),
-        supabase.from('conversations').select('customer_id').eq('business_id', bid),
-        supabase.from('follows').select('user_id').eq('business_id', bid),
-        supabase
-          .from('inbox_canned_replies')
-          .select('id, title, body, sort_order')
-          .eq('business_id', bid)
-          .order('sort_order', { ascending: true })
-          .order('title', { ascending: true }),
-      ])
+        const shouldFetchPending = wantBell || wantMembers || wantPendingDetail
+        const pendingUrl = wantPendingDetail
+          ? '/api/staff/pending-signups'
+          : '/api/staff/pending-signups?countOnly=1'
+        const pendingFetch: Promise<{ pending?: PendingCustomer[]; count?: number; error?: string }> =
+          shouldFetchPending
+            ? fetch(pendingUrl, {
+                method: 'GET',
+                cache: 'no-store',
+                signal: AbortSignal.timeout(25_000),
+              })
+                .then(async (r) => {
+                  const j = (await r.json().catch(() => ({}))) as {
+                    pending?: PendingCustomer[]
+                    count?: number
+                    error?: string
+                  }
+                  if (!r.ok) return { error: j.error || `HTTP ${r.status}` }
+                  return wantPendingDetail ? { pending: j.pending ?? [] } : { count: j.count ?? 0 }
+                })
+                .catch((e: unknown) => {
+                  const raw = e instanceof Error ? e.message : 'Network error'
+                  const isOffline =
+                    e instanceof TypeError &&
+                    (raw === 'Failed to fetch' ||
+                      raw === 'Load failed' ||
+                      raw === 'NetworkError when attempting to fetch resource.')
+                  return {
+                    error: isOffline
+                      ? 'Could not reach the app server for pending signups (often: dev server stopped, tab offline, or request blocked). Try Refresh after confirming npm run dev is running.'
+                      : raw,
+                  }
+                })
+            : Promise.resolve({})
 
-      const errs: string[] = []
-      if (convRes.error) errs.push(`conversations: ${convRes.error.message}`)
-      if (pendingRes.error) errs.push(`pending: ${pendingRes.error}`)
-      if (reportRes.error) errs.push(`reports: ${reportRes.error.message}`)
-      if (convCustRes.error) errs.push(`members(conv): ${convCustRes.error.message}`)
-      if (followRes.error) errs.push(`members(follows): ${followRes.error.message}`)
-      if (cannedRes.error) errs.push(`canned replies: ${cannedRes.error.message}`)
-      if (errs.length) setLoadError(errs.join(' · '))
+        const [convoRows, pendingRes, reportRes, cannedRes] = await Promise.all([
+          wantInbox
+            ? fetchAllBusinessConversations(supabase, bid, { maxRows: INBOX_LIST_DEFAULT_MAX })
+            : Promise.resolve([]),
+          pendingFetch,
+          wantReports
+            ? supabase
+                .from('admin_reports')
+                .select('id, reporter_name, category, status, details, created_at')
+                .eq('business_id', bid)
+                .order('created_at', { ascending: false })
+                .limit(20)
+            : Promise.resolve({ data: null, error: null }),
+          wantCanned
+            ? supabase
+                .from('inbox_canned_replies')
+                .select('id, title, body, sort_order')
+                .eq('business_id', bid)
+                .order('sort_order', { ascending: true })
+                .order('title', { ascending: true })
+            : Promise.resolve({ data: null, error: null }),
+        ])
 
-      if (!cannedRes.error) {
-        setCannedReplies(
-          (cannedRes.data || []).map((r: Record<string, unknown>) => ({
-            id: r.id as string,
-            title: r.title as string,
-            body: r.body as string,
-            sort_order: Number(r.sort_order ?? 0),
-          }))
-        )
-      } else {
-        setCannedReplies([])
-      }
+        const errs: string[] = []
+        if (pendingRes.error) errs.push(`pending: ${pendingRes.error}`)
+        if (wantReports && reportRes.error) errs.push(`reports: ${reportRes.error.message}`)
+        if (wantCanned && cannedRes.error) errs.push(`canned replies: ${cannedRes.error.message}`)
+        if (errs.length) setLoadError(errs.join(' · '))
 
-      const convoRows = convRes.data || []
-      setPendingCustomers((pendingRes.pending || []) as PendingCustomer[])
-
-      if (Array.isArray(reportRes.data) && reportRes.data.length > 0) {
-        setReports(
-          reportRes.data.map((r: Record<string, unknown>) => ({
-            id: r.id as string,
-            name: r.reporter_name as string,
-            type: r.category as string,
-            status: r.status as ReportItem['status'],
-            details: r.details as string,
-          }))
-        )
-      } else {
-        setReports([])
-      }
-
-      const convIds = convoRows.map((c: { id: string }) => c.id)
-      const customerIds = [...new Set(convoRows.map((c: { customer_id: string }) => c.customer_id))]
-
-      const profileById: Record<string, { first_name: string; last_name: string; username: string; avatar_url?: string | null }> = {}
-      if (customerIds.length > 0) {
-        for (let i = 0; i < customerIds.length; i += PROFILE_ID_IN_CHUNK) {
-          const slice = customerIds.slice(i, i + PROFILE_ID_IN_CHUNK)
-          const { data: profs, error: pe } = await supabase
-            .from('profiles')
-            .select('id, first_name, last_name, username, avatar_url')
-            .in('id', slice)
-          if (pe) {
-            setLoadError((prev) => (prev ? `${prev} · ` : '') + `profiles: ${pe.message}`)
-            break
-          }
-          for (const row of profs || []) {
-            const r = row as { id: string; first_name: string; last_name: string; username: string; avatar_url?: string | null }
-            profileById[r.id] = r
+        if (wantCanned) {
+          if (!cannedRes.error) {
+            setCannedReplies(
+              (cannedRes.data || []).map((r: Record<string, unknown>) => ({
+                id: r.id as string,
+                title: r.title as string,
+                body: r.body as string,
+                sort_order: Number(r.sort_order ?? 0),
+              }))
+            )
+          } else {
+            setCannedReplies([])
           }
         }
-      }
 
-      const previewByConvo: Record<string, { body: string; created_at: string }> = {}
-      const unreadByConvo: Record<string, number> = {}
-      if (convIds.length > 0) {
-        const { data: previews, error: previewErr } = await supabase.rpc('inbox_latest_previews', {
-          p_conversation_ids: convIds,
-        })
-        if (previewErr) {
-          const msg = previewErr.message || ''
-          const missingRpc =
-            previewErr.code === 'PGRST202' ||
-            previewErr.code === '42883' ||
-            /does not exist|schema cache|Could not find the function/i.test(msg)
-          if (missingRpc) {
-            const { data: msgs, error: me } = await supabase
-              .from('messages')
-              .select('conversation_id, body, created_at')
-              .in('conversation_id', convIds)
-              .order('created_at', { ascending: false })
-              .limit(10000)
-            if (me) setLoadError((prev) => (prev ? `${prev} · ` : '') + `messages: ${me.message}`)
-            for (const m of msgs || []) {
-              const row = m as { conversation_id: string; body: string; created_at: string }
-              const prev = previewByConvo[row.conversation_id]
-              if (!prev || new Date(row.created_at) > new Date(prev.created_at)) {
-                previewByConvo[row.conversation_id] = { body: row.body, created_at: row.created_at }
+        if (wantPendingDetail && pendingRes.pending) {
+          setPendingCustomers(pendingRes.pending)
+          setPendingSignupCount(pendingRes.pending.length)
+        } else if (typeof pendingRes.count === 'number') {
+          setPendingSignupCount(pendingRes.count)
+        }
+
+        if (wantReports) {
+          if (Array.isArray(reportRes.data) && reportRes.data.length > 0) {
+            setReports(
+              reportRes.data.map((r: Record<string, unknown>) => ({
+                id: r.id as string,
+                name: r.reporter_name as string,
+                type: r.category as string,
+                status: r.status as ReportItem['status'],
+                details: r.details as string,
+              }))
+            )
+          } else {
+            setReports([])
+          }
+        }
+
+        let list = convoListRef.current
+        if (wantInbox) {
+          const convIds = convoRows.map((c) => c.id)
+          const customerIds = [...new Set(convoRows.map((c) => c.customer_id))]
+
+          const profileById: Record<
+            string,
+            { first_name: string; last_name: string; username: string; avatar_url?: string | null }
+          > = {}
+          if (customerIds.length > 0) {
+            for (let i = 0; i < customerIds.length; i += PROFILE_ID_IN_CHUNK) {
+              const slice = customerIds.slice(i, i + PROFILE_ID_IN_CHUNK)
+              const { data: profs, error: pe } = await supabase
+                .from('profiles')
+                .select('id, first_name, last_name, username, avatar_url')
+                .in('id', slice)
+              if (pe) {
+                setLoadError((prev) => (prev ? `${prev} · ` : '') + `profiles: ${pe.message}`)
+                break
+              }
+              for (const row of profs || []) {
+                const r = row as {
+                  id: string
+                  first_name: string
+                  last_name: string
+                  username: string
+                  avatar_url?: string | null
+                }
+                profileById[r.id] = r
               }
             }
-          } else {
-            setLoadError((prev) => (prev ? `${prev} · ` : '') + `inbox_latest_previews: ${msg}`)
           }
-        } else {
-          for (const row of previews || []) {
-            const r = row as { conversation_id: string; body: string; created_at: string }
-            previewByConvo[r.conversation_id] = { body: r.body, created_at: r.created_at }
-          }
-        }
 
-        const customerByConvo = Object.fromEntries(
-          convoRows.map((r: { id: string; customer_id: string }) => [r.id, r.customer_id])
-        ) as Record<string, string>
-
-        const { data: unreadRows, error: ue } = await supabase
-          .from('messages')
-          .select('conversation_id, sender_id, read')
-          .in('conversation_id', convIds)
-        if (ue) setLoadError((prev) => (prev ? `${prev} · ` : '') + `messages(unread): ${ue.message}`)
-        for (const m of unreadRows || []) {
-          const row = m as { conversation_id: string; sender_id: string; read: boolean | null }
-          if (row.read === true) continue
-          const cust = customerByConvo[row.conversation_id]
-          if (cust && row.sender_id === cust) {
-            unreadByConvo[row.conversation_id] = (unreadByConvo[row.conversation_id] || 0) + 1
-          }
-        }
-      }
-
-      const { data: defRows, error: defErr } = await supabase
-        .from('inbox_label_definitions')
-        .select('id, name, color, is_system, preset_key')
-        .eq('business_id', bid)
-        .order('is_system', { ascending: false })
-        .order('name')
-      if (defErr)
-        setLoadError((prev) => (prev ? `${prev} · ` : '') + `inbox_label_definitions: ${defErr.message}`)
-      const labelCatalog: InboxLabelRow[] = (defRows || []).map((r: Record<string, unknown>) => ({
-        id: r.id as string,
-        name: r.name as string,
-        color: (r.color as string | null) ?? null,
-        is_system: Boolean(r.is_system),
-        preset_key: (r.preset_key as string | null | undefined) ?? null,
-      }))
-      setInboxLabelCatalog(labelCatalog)
-      const defById = Object.fromEntries(labelCatalog.map((d) => [d.id, d])) as Record<string, InboxLabelRow>
-      const labelsByConvo: Record<string, InboxLabelRow[]> = {}
-      if (convIds.length > 0 && !defErr) {
-        const { data: assignRows, error: assignErr } = await supabase
-          .from('conversation_inbox_labels')
-          .select('conversation_id, label_id')
-          .in('conversation_id', convIds)
-        if (assignErr)
-          setLoadError((prev) => (prev ? `${prev} · ` : '') + `conversation_inbox_labels: ${assignErr.message}`)
-        else {
-          for (const row of assignRows || []) {
-            const r = row as { conversation_id: string; label_id: string }
-            const d = defById[r.label_id]
-            if (!d) continue
-            if (!labelsByConvo[r.conversation_id]) labelsByConvo[r.conversation_id] = []
-            labelsByConvo[r.conversation_id].push(d)
-          }
-          for (const cid of Object.keys(labelsByConvo)) {
-            labelsByConvo[cid].sort((a, b) => {
-              if (a.is_system !== b.is_system) return a.is_system ? -1 : 1
-              return a.name.localeCompare(b.name)
+          const previewByConvo: Record<string, { body: string; created_at: string }> = {}
+          if (convIds.length > 0) {
+            const { data: previews, error: previewErr } = await supabase.rpc('inbox_latest_previews', {
+              p_conversation_ids: convIds,
             })
+            if (previewErr) {
+              const msg = previewErr.message || ''
+              const missingRpc =
+                previewErr.code === 'PGRST202' ||
+                previewErr.code === '42883' ||
+                /does not exist|schema cache|Could not find the function/i.test(msg)
+              if (missingRpc) {
+                const { data: msgs, error: me } = await supabase
+                  .from('messages')
+                  .select('conversation_id, body, created_at')
+                  .in('conversation_id', convIds)
+                  .order('created_at', { ascending: false })
+                  .limit(10000)
+                if (me) setLoadError((prev) => (prev ? `${prev} · ` : '') + `messages: ${me.message}`)
+                for (const m of msgs || []) {
+                  const row = m as { conversation_id: string; body: string; created_at: string }
+                  const prev = previewByConvo[row.conversation_id]
+                  if (!prev || new Date(row.created_at) > new Date(prev.created_at)) {
+                    previewByConvo[row.conversation_id] = { body: row.body, created_at: row.created_at }
+                  }
+                }
+              } else {
+                setLoadError((prev) => (prev ? `${prev} · ` : '') + `inbox_latest_previews: ${msg}`)
+              }
+            } else {
+              for (const row of previews || []) {
+                const r = row as { conversation_id: string; body: string; created_at: string }
+                previewByConvo[r.conversation_id] = { body: r.body, created_at: r.created_at }
+              }
+            }
           }
-        }
-      }
 
-      const list: ConvoListItem[] = convoRows.map((row: { id: string; customer_id: string; updated_at: string; staff_game_username?: string | null }) => {
-        const pr = profileById[row.customer_id]
-        const name = pr
-          ? `${pr.first_name ?? ''} ${pr.last_name ?? ''}`.trim() || pr.username
-          : 'Customer'
-        const pv = previewByConvo[row.id]
-        return {
-          id: row.id,
-          customer_id: row.customer_id,
-          customerName: name,
-          customerUsername: pr?.username ?? '—',
-          customerAvatar: pr?.avatar_url ?? null,
-          staffGameUsername: row.staff_game_username?.trim() || null,
-          preview: pv?.body || 'No messages yet',
-          updated_at: row.updated_at,
-          unreadCount: unreadByConvo[row.id] || 0,
-          labels: labelsByConvo[row.id] || [],
-        }
-      })
-      setConvoList(list)
+          const unreadByConvo = await fetchInboxUnreadCounts(supabase, convoRows)
 
-      {
-        const { data: escRows, error: escErr } = await supabase
-          .from('conversation_escalations')
-          .select('id, conversation_id, reason, status, escalated_by, claimed_by, created_at, claimed_at')
-          .eq('business_id', bid)
-          .in('status', ['pending', 'claimed'])
-        if (escErr) {
-          setLoadError((prev) => (prev ? `${prev} · ` : '') + `conversation_escalations: ${escErr.message}`)
-          setEscalationByConvoId({})
-        } else {
-          const escMap: Record<string, EscalationRow> = {}
-          for (const row of escRows || []) {
-            const r = row as EscalationRow
-            escMap[r.conversation_id] = r
-          }
-          setEscalationByConvoId(escMap)
-
-          const labeledEscalated = list.filter((c) =>
-            (labelsByConvo[c.id] || []).some((l) => l.preset_key === INBOX_LABEL_TECHNICAL_ESCALATION)
-          )
-          const needsSync = labeledEscalated.filter((c) => !escMap[c.id]).map((c) => c.id)
-          if (needsSync.length > 0) {
-            void (async () => {
-              for (const cid of needsSync) {
-                await fetch('/api/staff/sync-technical-escalation', {
-                  method: 'POST',
-                  headers: { 'Content-Type': 'application/json' },
-                  body: JSON.stringify({ conversationId: cid }),
+          const { data: defRows, error: defErr } = await supabase
+            .from('inbox_label_definitions')
+            .select('id, name, color, is_system, preset_key')
+            .eq('business_id', bid)
+            .order('is_system', { ascending: false })
+            .order('name')
+          if (defErr)
+            setLoadError((prev) => (prev ? `${prev} · ` : '') + `inbox_label_definitions: ${defErr.message}`)
+          const labelCatalog: InboxLabelRow[] = (defRows || []).map((r: Record<string, unknown>) => ({
+            id: r.id as string,
+            name: r.name as string,
+            color: (r.color as string | null) ?? null,
+            is_system: Boolean(r.is_system),
+            preset_key: (r.preset_key as string | null | undefined) ?? null,
+          }))
+          setInboxLabelCatalog(labelCatalog)
+          const defById = Object.fromEntries(labelCatalog.map((d) => [d.id, d])) as Record<string, InboxLabelRow>
+          const labelsByConvo: Record<string, InboxLabelRow[]> = {}
+          if (convIds.length > 0 && !defErr) {
+            const { data: assignRows, error: assignErr } = await supabase
+              .from('conversation_inbox_labels')
+              .select('conversation_id, label_id')
+              .in('conversation_id', convIds)
+            if (assignErr)
+              setLoadError((prev) => (prev ? `${prev} · ` : '') + `conversation_inbox_labels: ${assignErr.message}`)
+            else {
+              for (const row of assignRows || []) {
+                const r = row as { conversation_id: string; label_id: string }
+                const d = defById[r.label_id]
+                if (!d) continue
+                if (!labelsByConvo[r.conversation_id]) labelsByConvo[r.conversation_id] = []
+                labelsByConvo[r.conversation_id].push(d)
+              }
+              for (const cid of Object.keys(labelsByConvo)) {
+                labelsByConvo[cid].sort((a, b) => {
+                  if (a.is_system !== b.is_system) return a.is_system ? -1 : 1
+                  return a.name.localeCompare(b.name)
                 })
               }
-              const { data: escRows2, error: escErr2 } = await supabase
-                .from('conversation_escalations')
-                .select('id, conversation_id, reason, status, escalated_by, claimed_by, created_at, claimed_at')
-                .eq('business_id', bid)
-                .in('status', ['pending', 'claimed'])
-              if (!escErr2 && escRows2) {
-                const nextMap: Record<string, EscalationRow> = {}
-                for (const row of escRows2) {
-                  const r = row as EscalationRow
-                  nextMap[r.conversation_id] = r
+            }
+          }
+
+          list = convoRows.map((row) => {
+            const pr = profileById[row.customer_id]
+            const name = pr
+              ? `${pr.first_name ?? ''} ${pr.last_name ?? ''}`.trim() || pr.username
+              : 'Customer'
+            const pv = previewByConvo[row.id]
+            return {
+              id: row.id,
+              customer_id: row.customer_id,
+              customerName: name,
+              customerUsername: pr?.username ?? '—',
+              customerAvatar: pr?.avatar_url ?? null,
+              staffGameUsername: row.staff_game_username?.trim() || null,
+              preview: pv?.body || 'No messages yet',
+              updated_at: row.updated_at,
+              unreadCount: unreadByConvo[row.id] || 0,
+              labels: labelsByConvo[row.id] || [],
+            }
+          })
+          setConvoList(list)
+
+          const { data: escRows, error: escErr } = await supabase
+            .from('conversation_escalations')
+            .select('id, conversation_id, reason, status, escalated_by, claimed_by, created_at, claimed_at')
+            .eq('business_id', bid)
+            .in('status', ['pending', 'claimed'])
+          if (escErr) {
+            setLoadError((prev) => (prev ? `${prev} · ` : '') + `conversation_escalations: ${escErr.message}`)
+            setEscalationByConvoId({})
+          } else {
+            const escMap: Record<string, EscalationRow> = {}
+            for (const row of escRows || []) {
+              const r = row as EscalationRow
+              escMap[r.conversation_id] = r
+            }
+            setEscalationByConvoId(escMap)
+
+            const labeledEscalated = list.filter((c) =>
+              (labelsByConvo[c.id] || []).some((l) => l.preset_key === INBOX_LABEL_TECHNICAL_ESCALATION)
+            )
+            const needsSync = labeledEscalated.filter((c) => !escMap[c.id]).map((c) => c.id)
+            if (needsSync.length > 0) {
+              void (async () => {
+                for (const cid of needsSync) {
+                  await fetch('/api/staff/sync-technical-escalation', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ conversationId: cid }),
+                  })
                 }
-                setEscalationByConvoId(nextMap)
-              }
-            })()
+                const { data: escRows2, error: escErr2 } = await supabase
+                  .from('conversation_escalations')
+                  .select('id, conversation_id, reason, status, escalated_by, claimed_by, created_at, claimed_at')
+                  .eq('business_id', bid)
+                  .in('status', ['pending', 'claimed'])
+                if (!escErr2 && escRows2) {
+                  const nextMap: Record<string, EscalationRow> = {}
+                  for (const row of escRows2) {
+                    const r = row as EscalationRow
+                    nextMap[r.conversation_id] = r
+                  }
+                  setEscalationByConvoId(nextMap)
+                }
+              })()
+            }
           }
         }
-      }
 
-      {
-        const { count: bellCount, error: bellErr } = await supabase
-          .from('notifications')
-          .select('*', { count: 'exact', head: true })
-          .eq('user_id', p.id)
-          .eq('read', false)
-        if (!bellErr) setStaffNotifyUnread(bellCount ?? 0)
-      }
-
-      const memberIds = new Set<string>()
-      for (const r of convCustRes.data || []) memberIds.add((r as { customer_id: string }).customer_id)
-      for (const r of followRes.data || []) memberIds.add((r as { user_id: string }).user_id)
-      const merged = [...memberIds]
-
-      if (merged.length === 0) {
-        setActiveMembers([])
-        setSuspendedMembers([])
-      } else {
-        const rows: ActiveMember[] = []
-        for (let i = 0; i < merged.length; i += PROFILE_ID_IN_CHUNK) {
-          const slice = merged.slice(i, i + PROFILE_ID_IN_CHUNK)
-          const { data: memberRows, error: me } = await supabase
-            .from('profiles')
-            .select('id, first_name, last_name, username, account_status, avatar_url')
-            .in('id', slice)
-            .eq('role', 'customer')
-            .in('account_status', ['approved', 'suspended'])
-            .is('deleted_at', null)
-          if (me) {
-            setLoadError((prev) => (prev ? `${prev} · ` : '') + `members: ${me.message}`)
-            break
-          }
-          rows.push(...((memberRows || []) as ActiveMember[]))
+        if (wantBell) {
+          const { count: bellCount, error: bellErr } = await supabase
+            .from('notifications')
+            .select('*', { count: 'exact', head: true })
+            .eq('user_id', p.id)
+            .eq('read', false)
+          if (!bellErr) setStaffNotifyUnread(bellCount ?? 0)
         }
-        const approved = rows.filter((r) => r.account_status === 'approved')
-        const suspended = rows.filter((r) => r.account_status === 'suspended')
-        approved.sort((a, b) => (a.username || '').localeCompare(b.username || ''))
-        suspended.sort((a, b) => (a.username || '').localeCompare(b.username || ''))
-        setActiveMembers(approved)
-        setSuspendedMembers(suspended)
+
+        let nextActive = activeMembersRef.current
+        let nextSuspended = suspendedMembersRef.current
+        if (wantMembers) {
+          try {
+            const memberProfiles = await listBusinessMemberProfiles(supabase, bid)
+            nextActive = memberProfiles.filter((r) => r.account_status === 'approved') as ActiveMember[]
+            nextSuspended = memberProfiles.filter((r) => r.account_status === 'suspended') as ActiveMember[]
+            setActiveMembers(nextActive)
+            setSuspendedMembers(nextSuspended)
+          } catch (me) {
+            const msg = me instanceof Error ? me.message : 'members load failed'
+            setLoadError((prev) => (prev ? `${prev} · ` : '') + `members: ${msg}`)
+          }
+        }
+
+        let nextPendingCount = pendingSignupCount
+        if (typeof pendingRes.count === 'number') nextPendingCount = pendingRes.count
+        else if (wantPendingDetail && pendingRes.pending) nextPendingCount = pendingRes.pending.length
+
+        scopeLoadedAtRef.current[scope] = Date.now()
+
+        writeDashCache(bid, {
+          convoList: wantInbox ? list : convoListRef.current,
+          activeMembers: wantMembers ? nextActive : activeMembersRef.current,
+          suspendedMembers: wantMembers ? nextSuspended : suspendedMembersRef.current,
+          pendingCustomers: wantPendingDetail && pendingRes.pending ? pendingRes.pending : pendingCustomersRef.current,
+          pendingSignupCount: nextPendingCount,
+        })
+      } finally {
+        if (wantInbox) {
+          setInboxLoading(false)
+          setInboxRefreshing(false)
+        }
+        if (wantMembers) {
+          setUsersLoading(false)
+          setUsersRefreshing(false)
+        }
+        scopeInflightRef.current[scope] = false
       }
     },
     [supabase]
   )
+
+  refreshDashboardRef.current = refreshDashboard
+
+  const switchTab = useCallback((tab: AppTab) => {
+    setActiveTab(tab)
+    setMountedTabs((prev) => {
+      if (prev.has(tab)) return prev
+      return new Set(prev).add(tab)
+    })
+
+    window.requestAnimationFrame(() => {
+      const prof = profileRef.current
+      if (!prof?.business_id) return
+      const staleMs = 60_000
+      const now = Date.now()
+      if (isInboxTab(tab) && now - (scopeLoadedAtRef.current.inbox ?? 0) > staleMs) {
+        void refreshDashboardRef.current(prof, { scope: 'inbox' })
+      } else if (tab === 'users' && now - (scopeLoadedAtRef.current.users ?? 0) > staleMs) {
+        void refreshDashboardRef.current(prof, { scope: 'users', pendingDetail: true })
+      }
+    })
+  }, [])
 
   const loadMyAnnouncements = useCallback(
     async (businessId: string) => {
@@ -1349,70 +1480,127 @@ export default function DashboardPage() {
   useEffect(() => {
     let cancelled = false
     async function init() {
-      const {
-        data: { user },
-      } = await supabase.auth.getUser()
-      if (!user) {
-        router.replace('/login')
-        return
-      }
+      try {
+        const {
+          data: { user },
+        } = await supabase.auth.getUser()
+        if (!user) {
+          router.replace('/login')
+          return
+        }
 
-      const { data: prof, error } = await supabase
-        .from('profiles')
-        .select('id, role, username, avatar_url, business_id, business_role, support_inbox_scope, deleted_at, account_status')
-        .eq('id', user.id)
-        .single()
+        const { data: prof, error } = await supabase
+          .from('profiles')
+          .select('id, role, username, avatar_url, business_id, business_role, support_inbox_scope, deleted_at, account_status')
+          .eq('id', user.id)
+          .single()
 
-      if (error || !prof) {
-        router.replace('/login')
-        return
-      }
+        if (error || !prof) {
+          router.replace('/login')
+          return
+        }
 
-      const p = prof as ProfileRow & { deleted_at?: string | null; account_status?: string }
-      if (p.deleted_at) {
-        await supabase.auth.signOut()
-        router.replace('/login')
-        return
-      }
-      if (p.account_status && p.account_status !== 'approved') {
-        await supabase.auth.signOut()
-        router.replace('/login')
-        return
-      }
+        const p = prof as ProfileRow & { deleted_at?: string | null; account_status?: string }
+        if (p.deleted_at) {
+          await supabase.auth.signOut()
+          router.replace('/login')
+          return
+        }
+        if (p.account_status && p.account_status !== 'approved') {
+          await supabase.auth.signOut()
+          router.replace('/login')
+          return
+        }
 
-      const pRow: ProfileRow = {
-        id: p.id,
-        role: p.role,
-        username: p.username,
-        avatar_url: p.avatar_url,
-        business_id: p.business_id,
-        business_role: p.business_role,
-        support_inbox_scope: parseSupportInboxScope(
-          (p as { support_inbox_scope?: string | null }).support_inbox_scope
-        ),
+        const pRow: ProfileRow = {
+          id: p.id,
+          role: p.role,
+          username: p.username,
+          avatar_url: p.avatar_url,
+          business_id: p.business_id,
+          business_role: p.business_role,
+          support_inbox_scope: parseSupportInboxScope(
+            (p as { support_inbox_scope?: string | null }).support_inbox_scope
+          ),
+        }
+        if (pRow.role !== 'business') {
+          router.replace('/feed')
+          return
+        }
+        if (cancelled) return
+
+        const cached = pRow.business_id ? readDashCache(pRow.business_id) : null
+        if (cached) {
+          setConvoList(cached.convoList)
+          setActiveMembers(cached.activeMembers)
+          setSuspendedMembers(cached.suspendedMembers)
+          setPendingCustomers(cached.pendingCustomers ?? [])
+          setPendingSignupCount(cached.pendingSignupCount)
+          scopeLoadedAtRef.current.inbox = cached.at
+          scopeLoadedAtRef.current.users = cached.at
+          scopeLoadedAtRef.current.light = cached.at
+        }
+
+        setProfile(pRow)
+        void refreshDashboardRef.current(pRow, { scope: 'light' })
+        window.setTimeout(() => {
+          if (cancelled) return
+          void refreshDashboardRef.current(pRow, { scope: 'inbox' })
+        }, 150)
+        window.setTimeout(() => {
+          if (cancelled) return
+          void refreshDashboardRef.current(pRow, { scope: 'users', pendingDetail: true })
+        }, 300)
+      } catch (e) {
+        console.error('[dashboard init]', e)
+        setLoadError(e instanceof Error ? e.message : 'Could not load dashboard')
+      } finally {
+        if (!cancelled) setLoading(false)
       }
-      if (pRow.role !== 'business') {
-        router.replace('/feed')
-        return
-      }
-      if (cancelled) return
-      setProfile(pRow)
-      setLoading(false)
-      await refreshDashboard(pRow)
     }
     void init()
     return () => {
       cancelled = true
     }
-  }, [router, supabase, refreshDashboard])
+  }, [router, supabase])
 
   useEffect(() => {
     const id = window.setInterval(() => {
-      const p = profileRef.current
-      if (p?.business_id) void refreshDashboard(p)
-    }, 30_000)
+      if (document.visibilityState !== 'visible') return
+      const prof = profileRef.current
+      if (!prof?.business_id) return
+      const tab = activeTabRef.current
+      if (isInboxTab(tab)) void refreshDashboard(prof, { scope: 'inbox' })
+      else if (tab === 'users') void refreshDashboard(prof, { scope: 'users', pendingDetail: true })
+      else void refreshDashboard(prof, { scope: 'light' })
+    }, 60_000)
     return () => window.clearInterval(id)
   }, [refreshDashboard])
+
+  useEffect(() => {
+    if (!profile?.business_id) return
+    const t = window.setTimeout(() => {
+      setMountedTabs((prev) => {
+        const next = new Set(prev)
+        next.add('inbox-website')
+        next.add('users')
+        if (profile.business_role === 'technical') next.add('inbox-technical')
+        return next
+      })
+    }, 50)
+    return () => window.clearTimeout(t)
+  }, [profile?.business_id, profile?.business_role])
+
+  useEffect(() => {
+    if (isInboxTab(activeTab)) return
+    const raf = window.requestAnimationFrame(() => {
+      startTransition(() => {
+        setSelectedConvoId(null)
+        setThreadMessages([])
+      })
+    })
+    return () => window.cancelAnimationFrame(raf)
+  }, [activeTab])
 
   useEffect(() => {
     setInboxContactOpen(false)
@@ -1448,31 +1636,164 @@ export default function DashboardPage() {
     const p = profileRef.current
     if (!p?.business_id) return
 
+    const bid = p.business_id
+
+    const patchInboxOnMessageRead = (payload: { new: Record<string, unknown> }) => {
+      const msg = payload.new as {
+        conversation_id?: string
+        sender_id?: string
+        read?: boolean | null
+      }
+      if (!msg.conversation_id || msg.read !== true) return
+      const conv = convoListRef.current.find((c) => c.id === msg.conversation_id)
+      if (!conv || msg.sender_id !== conv.customer_id) return
+      setConvoList((list) =>
+        list.map((c) =>
+          c.id === msg.conversation_id ? { ...c, unreadCount: Math.max(0, c.unreadCount - 1) } : c
+        )
+      )
+    }
+
+    const bumpInboxOnCustomerMessage = (payload: { new: Record<string, unknown> }): boolean => {
+      const msg = payload.new as {
+        conversation_id?: string
+        sender_id?: string
+        body?: string
+        created_at?: string
+        is_internal?: boolean
+      }
+      if (!msg.conversation_id || msg.is_internal) return false
+      const conv = convoListRef.current.find((c) => c.id === msg.conversation_id)
+      if (!conv || msg.sender_id !== conv.customer_id) return false
+      const viewing = isActivelyViewingInboxThread(msg.conversation_id)
+      setConvoList((prev) => {
+        const idx = prev.findIndex((c) => c.id === msg.conversation_id)
+        if (idx < 0) return prev
+        const cur = prev[idx]
+        const preview = (msg.body ?? '').trim().slice(0, 160) || cur.preview
+        const updated: ConvoListItem = {
+          ...cur,
+          preview,
+          updated_at: msg.created_at ?? new Date().toISOString(),
+          unreadCount: viewing ? cur.unreadCount : cur.unreadCount + 1,
+        }
+        const next = [...prev]
+        next.splice(idx, 1)
+        next.unshift(updated)
+        return next
+      })
+      return true
+    }
+
+    const bumpInboxOnTeamMessage = (payload: { new: Record<string, unknown> }): boolean => {
+      const msg = payload.new as {
+        conversation_id?: string
+        sender_id?: string
+        body?: string
+        created_at?: string
+      }
+      if (!msg.conversation_id) return false
+      const conv = convoListRef.current.find((c) => c.id === msg.conversation_id)
+      if (!conv || msg.sender_id === conv.customer_id) return false
+      setConvoList((prev) => {
+        const idx = prev.findIndex((c) => c.id === msg.conversation_id)
+        if (idx < 0) return prev
+        const cur = prev[idx]
+        const preview = (msg.body ?? '').trim().slice(0, 160) || cur.preview
+        const updated: ConvoListItem = {
+          ...cur,
+          preview,
+          updated_at: msg.created_at ?? new Date().toISOString(),
+        }
+        const next = [...prev]
+        next.splice(idx, 1)
+        next.unshift(updated)
+        return next
+      })
+      return true
+    }
+
+    const resolveInboundCustomerMessage = (payload: { new: Record<string, unknown> }) => {
+      const msg = payload.new as { conversation_id?: string; sender_id?: string }
+      if (!msg.conversation_id || !msg.sender_id) return
+      void (async () => {
+        const { data: convo } = await supabase
+          .from('conversations')
+          .select('id, customer_id, updated_at, staff_game_username')
+          .eq('id', msg.conversation_id)
+          .eq('business_id', bid)
+          .maybeSingle()
+        if (!convo || convo.customer_id !== msg.sender_id) return
+        if (convoListRef.current.some((c) => c.id === convo.id)) return
+        const { data: prof } = await supabase
+          .from('profiles')
+          .select('first_name, last_name, username, avatar_url')
+          .eq('id', convo.customer_id)
+          .maybeSingle()
+        const pr = prof as {
+          first_name?: string | null
+          last_name?: string | null
+          username?: string | null
+          avatar_url?: string | null
+        } | null
+        const name = pr
+          ? `${pr.first_name ?? ''} ${pr.last_name ?? ''}`.trim() || (pr.username ?? 'Customer')
+          : 'Customer'
+        const body = (payload.new as { body?: string }).body ?? ''
+        const createdAt = (payload.new as { created_at?: string }).created_at ?? convo.updated_at
+        const item: ConvoListItem = {
+          id: convo.id as string,
+          customer_id: convo.customer_id as string,
+          customerName: name,
+          customerUsername: pr?.username ?? '—',
+          customerAvatar: pr?.avatar_url ?? null,
+          staffGameUsername: (convo.staff_game_username as string | null)?.trim() || null,
+          preview: body.trim().slice(0, 160) || 'No messages yet',
+          updated_at: createdAt as string,
+          unreadCount: 1,
+          labels: [],
+        }
+        setConvoList((prev) => [item, ...prev].slice(0, INBOX_LIST_DEFAULT_MAX))
+      })()
+    }
+
     let timer: number | null = null
     const queueRefresh = () => {
       if (timer) window.clearTimeout(timer)
       timer = window.setTimeout(() => {
         const current = profileRef.current
-        if (current?.business_id) void refreshDashboard(current)
-      }, 350)
+        if (current?.business_id) void refreshDashboardRef.current(current, { scope: 'inbox' })
+      }, 400)
     }
 
     const channel = supabase
-      .channel(`staff-dashboard-${p.business_id}`)
-      .on('postgres_changes', { event: '*', schema: 'public', table: 'conversations', filter: `business_id=eq.${p.business_id}` }, queueRefresh)
-      .on('postgres_changes', { event: '*', schema: 'public', table: 'admin_reports', filter: `business_id=eq.${p.business_id}` }, queueRefresh)
-      .on('postgres_changes', { event: '*', schema: 'public', table: 'follows', filter: `business_id=eq.${p.business_id}` }, queueRefresh)
+      .channel(`staff-dashboard-${bid}`)
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'conversations', filter: `business_id=eq.${bid}` }, queueRefresh)
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'admin_reports', filter: `business_id=eq.${bid}` }, () => {
+        const current = profileRef.current
+        if (current?.business_id) void refreshDashboardRef.current(current, { scope: 'light' })
+      })
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'follows', filter: `business_id=eq.${bid}` }, () => {
+        const current = profileRef.current
+        if (current?.business_id) void refreshDashboardRef.current(current, { scope: 'users' })
+      })
       .on('postgres_changes', { event: '*', schema: 'public', table: 'conversation_inbox_labels' }, queueRefresh)
-      .on('postgres_changes', { event: '*', schema: 'public', table: 'conversation_escalations', filter: `business_id=eq.${p.business_id}` }, queueRefresh)
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'conversation_escalations', filter: `business_id=eq.${bid}` }, queueRefresh)
       .on('postgres_changes', { event: '*', schema: 'public', table: 'inbox_label_definitions' }, queueRefresh)
       .on('postgres_changes', { event: '*', schema: 'public', table: 'inbox_canned_replies' }, queueRefresh)
+      .on('postgres_changes', { event: 'INSERT', schema: 'public', table: 'messages' }, (payload) => {
+        if (bumpInboxOnCustomerMessage(payload)) return
+        if (bumpInboxOnTeamMessage(payload)) return
+        resolveInboundCustomerMessage(payload)
+      })
+      .on('postgres_changes', { event: 'UPDATE', schema: 'public', table: 'messages' }, patchInboxOnMessageRead)
       .subscribe()
 
     return () => {
       if (timer) window.clearTimeout(timer)
       void supabase.removeChannel(channel)
     }
-  }, [supabase, refreshDashboard, profile?.business_id])
+  }, [supabase, profile?.business_id])
 
   useEffect(() => {
     if (!selectedConvoId || !profile?.id) return
@@ -1610,21 +1931,29 @@ export default function DashboardPage() {
     const uid = profile?.id
     if (!uid) return
 
-    async function bumpBell() {
-      const { count } = await supabase
-        .from('notifications')
-        .select('*', { count: 'exact', head: true })
-        .eq('user_id', uid)
-        .eq('read', false)
-      setStaffNotifyUnread(count ?? 0)
-    }
-
     const channel = supabase
       .channel(`staff-notifications-${uid}`)
       .on(
         'postgres_changes',
-        { event: '*', schema: 'public', table: 'notifications', filter: `user_id=eq.${uid}` },
-        () => void bumpBell()
+        { event: 'INSERT', schema: 'public', table: 'notifications', filter: `user_id=eq.${uid}` },
+        (payload) => {
+          const row = payload.new as { type?: string; read?: boolean }
+          if (row?.read) return
+          if (row?.type === 'support_message' || row?.type === 'staff_alert') {
+            setStaffNotifyUnread((n) => n + 1)
+          }
+        }
+      )
+      .on(
+        'postgres_changes',
+        { event: 'UPDATE', schema: 'public', table: 'notifications', filter: `user_id=eq.${uid}` },
+        (payload) => {
+          const row = payload.new as { read?: boolean }
+          const old = payload.old as { read?: boolean }
+          if (row?.read && !old?.read) {
+            setStaffNotifyUnread((n) => Math.max(0, n - 1))
+          }
+        }
       )
       .subscribe()
 
@@ -1635,7 +1964,7 @@ export default function DashboardPage() {
 
   const openMessageFromNotifyRef = useRef<(conversationId: string) => void>(() => {})
   openMessageFromNotifyRef.current = (conversationId: string) => {
-    setActiveTab(resolveInboxTabForConversation(conversationId))
+    switchTab(resolveInboxTabForConversation(conversationId))
     void openThread(conversationId)
   }
 
@@ -1700,14 +2029,14 @@ export default function DashboardPage() {
   useEffect(() => {
     if (!profile) return
     if (profile.business_role === 'technical' && activeTab !== 'inbox-technical') {
-      setActiveTab('inbox-technical')
+      switchTab('inbox-technical')
       setSelectedConvoId(null)
       return
     }
     if (profile.business_role === 'technical') return
     const scope = effectiveSupportInboxScope(profile)
     if (scope && isChannelInboxTab(activeTab) && !scopeAllowsInboxTab(scope, activeTab)) {
-      setActiveTab(defaultInboxTabForScope(scope))
+      switchTab(defaultInboxTabForScope(scope))
       setSelectedConvoId(null)
     }
   }, [profile, activeTab])
@@ -1721,7 +2050,7 @@ export default function DashboardPage() {
   useEffect(() => {
     if (!profile) return
     if (profile.business_role !== 'admin' && activeTab === 'team') {
-      setActiveTab(profile.business_role === 'technical' ? 'inbox-technical' : 'home')
+      switchTab(profile.business_role === 'technical' ? 'inbox-technical' : 'home')
     }
   }, [profile, activeTab])
 
@@ -1912,7 +2241,7 @@ export default function DashboardPage() {
     if (!p?.business_id) return
     setDashRefreshing(true)
     try {
-      await refreshDashboard(p)
+      await refreshDashboard(p, { scope: 'full', force: true })
       if (p.business_role === 'admin' && activeTabRef.current === 'team') await loadTeam()
     } finally {
       setDashRefreshing(false)
@@ -2069,7 +2398,7 @@ export default function DashboardPage() {
       if (!r.ok) throw new Error(j.error || 'Escalation failed')
       setEscalateModalOpen(false)
       setEscalateReasonDraft('')
-      await refreshDashboard(profileRef.current!)
+      await refreshDashboard(profileRef.current!, { scope: 'inbox' })
       await reloadThreadMessages(selectedConvoId, { markRead: false })
     } catch (e) {
       alert(e instanceof Error ? e.message : 'Could not escalate.')
@@ -2089,7 +2418,7 @@ export default function DashboardPage() {
       })
       const j = (await r.json().catch(() => ({}))) as { error?: string }
       if (!r.ok) throw new Error(j.error || 'Could not claim thread')
-      await refreshDashboard(profileRef.current!)
+      await refreshDashboard(profileRef.current!, { scope: 'inbox' })
     } catch (e) {
       alert(e instanceof Error ? e.message : 'Could not claim thread.')
     } finally {
@@ -2109,7 +2438,7 @@ export default function DashboardPage() {
       })
       const j = (await r.json().catch(() => ({}))) as { error?: string }
       if (!r.ok) throw new Error(j.error || 'Could not resolve escalation')
-      await refreshDashboard(profileRef.current!)
+      await refreshDashboard(profileRef.current!, { scope: 'inbox' })
       if (activeTabRef.current === 'inbox-technical') {
         setSelectedConvoId(null)
       }
@@ -2186,7 +2515,7 @@ export default function DashboardPage() {
       const j = (await res.json()) as { error?: string }
       if (!res.ok) throw new Error(j.error || 'Request failed')
       const p = profileRef.current
-      if (p) await refreshDashboard(p)
+      if (p) await refreshDashboard(p, { scope: 'users', pendingDetail: true })
     } catch (e) {
       alert(e instanceof Error ? e.message : 'Request failed')
     } finally {
@@ -2227,7 +2556,7 @@ export default function DashboardPage() {
       const j = (await res.json()) as { error?: string }
       if (!res.ok) throw new Error(j.error || 'Request failed')
       const p = profileRef.current
-      if (p) await refreshDashboard(p)
+      if (p) await refreshDashboard(p, { scope: 'users', pendingDetail: true })
     } catch (e) {
       alert(e instanceof Error ? e.message : 'Request failed')
     } finally {
@@ -2281,7 +2610,7 @@ export default function DashboardPage() {
     } catch (e) {
       alert(e instanceof Error ? e.message : 'Could not update label')
       const cur = profileRef.current
-      if (cur?.business_id) void refreshDashboard(cur)
+      if (cur?.business_id) void refreshDashboard(cur, { scope: 'inbox' })
     } finally {
       setInboxLabelRowBusy(null)
     }
@@ -2734,7 +3063,7 @@ export default function DashboardPage() {
         replyToMessageId: isInternal ? null : replyTarget?.id ?? null,
       })
       if (!msg) return
-      await refreshDashboard(profileRef.current!)
+      await refreshDashboard(profileRef.current!, { scope: 'inbox' })
     } catch (e) {
       console.error(e)
       if (text) setReplyDraft(text)
@@ -2765,7 +3094,7 @@ export default function DashboardPage() {
       }
       if (!conversationId) throw new Error('Could not start conversation')
       setInboxSearchQuery('')
-      await refreshDashboard(profileRef.current!)
+      await refreshDashboard(profileRef.current!, { scope: 'inbox' })
       await openThread(conversationId)
     } catch (e) {
       alert(e instanceof Error ? e.message : 'Could not open conversation')
@@ -2803,7 +3132,7 @@ export default function DashboardPage() {
       const msg = await insertStaffMessageToConversation(conversationId, draft, null)
       if (!msg) return
       setMemberComposeOpenId(null)
-      await refreshDashboard(profileRef.current!)
+      await refreshDashboard(profileRef.current!, { scope: 'inbox' })
     } catch (e) {
       console.error(e)
       setMemberMessageDrafts((prev) => ({ ...prev, [customerId]: draft }))
@@ -2819,7 +3148,7 @@ export default function DashboardPage() {
     if (!p?.business_id) return
     setInboxRefreshing(true)
     try {
-      await refreshDashboard(p)
+      await refreshDashboard(p, { scope: 'inbox', force: true })
       const cid = selectedConvoIdRef.current
       if (cid) await reloadThreadMessages(cid, { markRead: false })
     } finally {
@@ -2837,7 +3166,7 @@ export default function DashboardPage() {
       })
       const j = (await res.json()) as { error?: string }
       if (!res.ok) throw new Error(j.error || 'Request failed')
-      await refreshDashboard(profileRef.current!)
+      await refreshDashboard(profileRef.current!, { scope: 'inbox' })
     } catch (e) {
       alert(e instanceof Error ? e.message : 'Failed to update account')
     } finally {
@@ -3268,12 +3597,19 @@ export default function DashboardPage() {
   }
 
   const metrics = useMemo(() => {
-    const pending = pendingCustomers.filter((c) => c.account_status === 'pending').length
+    const pending =
+      pendingCustomers.length > 0
+        ? pendingCustomers.filter((c) => c.account_status === 'pending').length
+        : pendingSignupCount
     const openThreads = convoList.length
     const reportCount = reports.length
     const members = activeMembers.length
     return { pending, unread: openThreads, reportCount, members }
-  }, [pendingCustomers, convoList, reports, activeMembers])
+  }, [pendingCustomers, pendingSignupCount, convoList, reports, activeMembers])
+
+  const needsInboxLists = isInboxTab(activeTab)
+  const needsUsersLists = activeTab === 'users'
+  const needsNotifyLists = activeTab === 'notify'
 
   const inboxWebsiteUnreadTotal = useMemo(
     () =>
@@ -3326,18 +3662,20 @@ export default function DashboardPage() {
   const manualInboxLabelCatalog = inboxFilterLabelCatalog
 
   const convoListMerged = useMemo(() => {
+    if (!needsInboxLists) return []
     const byId = new Map<string, ConvoListItem>()
     for (const c of convoList) byId.set(c.id, c)
     for (const c of inboxSearchExtraConvos) {
       if (!byId.has(c.id)) byId.set(c.id, c)
     }
     return [...byId.values()].sort((a, b) => b.updated_at.localeCompare(a.updated_at))
-  }, [convoList, inboxSearchExtraConvos])
+  }, [convoList, inboxSearchExtraConvos, needsInboxLists])
 
   const inboxShowsRecentCap = convoList.length >= INBOX_THREAD_LIMIT
 
   /** Merge active-member profile data when inbox thread rows lack names (RLS gaps). */
   const convoListForInbox = useMemo(() => {
+    if (!needsInboxLists) return []
     const memberById = new Map<string, ActiveMember>()
     for (const m of activeMembers) memberById.set(m.id, m)
     for (const m of suspendedMembers) memberById.set(m.id, m)
@@ -3356,9 +3694,10 @@ export default function DashboardPage() {
         customerAvatar: c.customerAvatar ?? m.avatar_url ?? null,
       }
     })
-  }, [convoListMerged, activeMembers, suspendedMembers])
+  }, [convoListMerged, activeMembers, suspendedMembers, needsInboxLists])
 
   const filteredConvoList = useMemo(() => {
+    if (!needsInboxLists) return []
     const q = inboxSearchQuery.trim().toLowerCase().replace(/^@+/, '')
     if (!q) return convoListForInbox
     return convoListForInbox.filter((c) => {
@@ -3371,11 +3710,12 @@ export default function DashboardPage() {
         labelsText.includes(q)
       )
     })
-  }, [convoListForInbox, inboxSearchQuery])
+  }, [convoListForInbox, inboxSearchQuery, needsInboxLists])
 
   const staffInboxScope = profile ? effectiveSupportInboxScope(profile) : 'both'
 
   const channelFilteredConvoList = useMemo(() => {
+    if (!needsInboxLists) return []
     let list = filteredConvoList
     if (activeTab === 'inbox-technical') {
       list = list.filter((c) => threadHasChannelLabel(c, INBOX_LABEL_TECHNICAL_ESCALATION))
@@ -3392,9 +3732,11 @@ export default function DashboardPage() {
     activeTab,
     profile?.business_role,
     staffInboxScope,
+    needsInboxLists,
   ])
 
   const inboxDisplayList = useMemo(() => {
+    if (!needsInboxLists) return []
     if (inboxThreadLabelFilterIds.length === 0) return channelFilteredConvoList
     return channelFilteredConvoList.filter((c) =>
       inboxThreadLabelFilterIds.some((lid) => {
@@ -3402,7 +3744,7 @@ export default function DashboardPage() {
         return c.labels.some((l) => l.id === lid)
       })
     )
-  }, [channelFilteredConvoList, inboxThreadLabelFilterIds, unreadLabelDef.id])
+  }, [channelFilteredConvoList, inboxThreadLabelFilterIds, unreadLabelDef.id, needsInboxLists])
 
   /** Drop open thread when it falls outside the active channel or label filter. */
   useEffect(() => {
@@ -3699,7 +4041,7 @@ export default function DashboardPage() {
                 type="button"
                 title={sidebarCollapsed ? item.label : undefined}
                 onClick={() => {
-                  setActiveTab(item.id)
+                  switchTab(item.id)
                 }}
                 className={`admin-nav-link ${active ? 'is-active' : ''} ${sidebarCollapsed ? 'justify-center !px-0' : ''}`}
               >
@@ -3746,7 +4088,7 @@ export default function DashboardPage() {
           <div className="flex-1 min-w-0">
             <h2 className="text-[16px] font-bold tracking-[-0.02em] text-white leading-tight truncate">{headerTitle}</h2>
             <nav className="admin-breadcrumb mt-0.5" aria-label="Breadcrumb">
-              <button type="button" onClick={() => setActiveTab('home')} className="hover:text-[#c4cbe6]">
+              <button type="button" onClick={() => switchTab('home')} className="hover:text-[#c4cbe6]">
                 Home
               </button>
               <ChevronRight className="sep w-3 h-3" />
@@ -3835,7 +4177,7 @@ export default function DashboardPage() {
             </div>
           ) : null}
 
-        {activeTab === 'home' ? (
+        <StaffTabPanel tab="home" activeTab={activeTab} mountedTabs={mountedTabs} render={() => (
           <section className="space-y-3">
             <div className="grid grid-cols-2 lg:grid-cols-4 gap-2">
               <StatCard icon={<User2 className="w-4 h-4" />} label="Pending" value={metrics.pending} accent="yellow" />
@@ -3844,13 +4186,13 @@ export default function DashboardPage() {
               <StatCard icon={<Users className="w-4 h-4" />} label="Active members" value={metrics.members} accent="green" />
             </div>
             <div className={`grid gap-2 ${isAdmin ? 'grid-cols-2 sm:grid-cols-4' : staffInboxScope === 'both' ? 'grid-cols-2 sm:grid-cols-3' : 'grid-cols-2 sm:grid-cols-2'}`}>
-              <QuickButton icon={<User2 className="w-4 h-4" />} label="Review Queue" onClick={() => setActiveTab('users')} />
+              <QuickButton icon={<User2 className="w-4 h-4" />} label="Review Queue" onClick={() => switchTab('users')} />
               {(staffInboxScope === 'both' || staffInboxScope === 'website') ? (
                 <QuickButton
                   icon={<Globe className="w-4 h-4" />}
                   label="Website Inbox"
                   badgeCount={inboxWebsiteUnreadTotal}
-                  onClick={() => setActiveTab('inbox-website')}
+                  onClick={() => switchTab('inbox-website')}
                 />
               ) : null}
               {(staffInboxScope === 'both' || staffInboxScope === 'app') ? (
@@ -3858,7 +4200,7 @@ export default function DashboardPage() {
                   icon={<Smartphone className="w-4 h-4" />}
                   label="Juwa App Inbox"
                   badgeCount={inboxAppUnreadTotal}
-                  onClick={() => setActiveTab('inbox-app')}
+                  onClick={() => switchTab('inbox-app')}
                 />
               ) : null}
               {isAdmin ? (
@@ -3866,14 +4208,14 @@ export default function DashboardPage() {
                   icon={<Wrench className="w-4 h-4" />}
                   label="Technical"
                   badgeCount={inboxTechnicalUnreadTotal}
-                  onClick={() => setActiveTab('inbox-technical')}
+                  onClick={() => switchTab('inbox-technical')}
                 />
               ) : null}
-              <QuickButton icon={<Megaphone className="w-4 h-4" />} label="Post" onClick={() => setActiveTab('post')} />
+              <QuickButton icon={<Megaphone className="w-4 h-4" />} label="Post" onClick={() => switchTab('post')} />
               {isAdmin ? (
-                <QuickButton icon={<UserCog className="w-4 h-4" />} label="Team" onClick={() => setActiveTab('team')} />
+                <QuickButton icon={<UserCog className="w-4 h-4" />} label="Team" onClick={() => switchTab('team')} />
               ) : (
-                <QuickButton icon={<Send className="w-4 h-4" />} label="Send Notify" onClick={() => setActiveTab('notify')} />
+                <QuickButton icon={<Send className="w-4 h-4" />} label="Send Notify" onClick={() => switchTab('notify')} />
               )}
             </div>
             <div className="admin-card">
@@ -3883,7 +4225,7 @@ export default function DashboardPage() {
                 <div className="admin-card-tools">
                   <button
                     type="button"
-                    onClick={() => setActiveTab(staffInboxScope === 'app' ? 'inbox-app' : 'inbox-website')}
+                    onClick={() => switchTab(staffInboxScope === 'app' ? 'inbox-app' : 'inbox-website')}
                     className="text-[11px] font-semibold text-[#8892b0] hover:text-[#c4cbe6]"
                   >
                     View all
@@ -3902,7 +4244,7 @@ export default function DashboardPage() {
                       type="button"
                       key={item.id}
                       onClick={() => {
-                        setActiveTab(resolveInboxTabForConversation(item.id))
+                        switchTab(resolveInboxTabForConversation(item.id))
                         void openThread(item.id)
                       }}
                       className="w-full text-left px-3 py-2.5 flex items-start gap-2 hover:bg-white/[0.03] transition-colors"
@@ -3934,9 +4276,9 @@ export default function DashboardPage() {
               </div>
             </div>
           </section>
-        ) : null}
+        )} />
 
-        {activeTab === 'post' ? (
+        <StaffTabPanel tab="post" activeTab={activeTab} mountedTabs={mountedTabs} render={() => (
           <section className="space-y-3 max-w-4xl">
             <p className="text-[12px] text-[#8892b0] leading-relaxed">
               Goes to the public feed for all approved customers. They can like and comment. Everyone approved gets an in-app notification when you publish. Email goes only to customers labeled{' '}
@@ -4387,9 +4729,14 @@ export default function DashboardPage() {
               )}
             </div>
           </section>
-        ) : null}
+        )} />
 
-        {isInboxTab(activeTab) ? (
+        <StaffMultiTabPanel
+          tabs={['inbox-website', 'inbox-app', 'inbox-technical']}
+          activeTab={activeTab}
+          mountedTabs={mountedTabs}
+          isVisible={(tab) => isInboxTab(tab as AppTab)}
+          render={() => (
           <section className="flex flex-col flex-1 min-h-0 space-y-2">
             <DesktopNotificationPrompt variant="staff" />
             {!isAdmin && profile.business_role === 'support' && staffInboxScope ? (
@@ -4442,7 +4789,12 @@ export default function DashboardPage() {
               </div>
             </div>
 
-            {convoList.length === 0 ? (
+            {inboxLoading ? (
+              <div className="flex items-center justify-center py-12 text-[#8892b0]">
+                <Loader2 className="w-6 h-6 animate-spin text-[#f5d040] mr-2" />
+                Loading inbox…
+              </div>
+            ) : convoList.length === 0 ? (
               loadError ? (
                 <p className="text-sm text-red-300/90 rounded-xl border border-red-500/30 bg-red-500/10 px-3 py-2">
                   Threads could not load — see the error banner above. Staff must have{' '}
@@ -5347,10 +5699,24 @@ export default function DashboardPage() {
               </div>
             )}
           </section>
-        ) : null}
+        )}
+        />
 
-        {activeTab === 'users' ? (
+        <StaffTabPanel tab="users" activeTab={activeTab} mountedTabs={mountedTabs} render={() => (
           <section className="space-y-4">
+            {usersRefreshing ? (
+              <p className="text-[11px] text-[#8892b0] flex items-center gap-1.5">
+                <Loader2 className="w-3.5 h-3.5 animate-spin" />
+                Refreshing members…
+              </p>
+            ) : null}
+            {usersLoading ? (
+              <div className="flex items-center justify-center py-12 text-[#8892b0]">
+                <Loader2 className="w-6 h-6 animate-spin text-[#f5d040] mr-2" />
+                Loading members…
+              </div>
+            ) : (
+            <>
             <p className="text-[12px] text-[#8892b0] leading-relaxed">
               New customers join instantly with a welcome message. Manage active members here — suspend or remove accounts as needed. The Pending tab
               shows any legacy signups still awaiting manual review.
@@ -5723,10 +6089,13 @@ export default function DashboardPage() {
                   </div>
                 </div>
               ) : null}
+            </>
+            )}
           </section>
-        ) : null}
+        )} />
 
-        {activeTab === 'team' && isAdmin ? (
+        {isAdmin ? (
+        <StaffTabPanel tab="team" activeTab={activeTab} mountedTabs={mountedTabs} render={() => (
           <section className="space-y-4 max-w-3xl">
             <p className="text-[12px] text-[#8892b0] leading-relaxed">
               Create <strong className="text-[#c4cbe6]">support</strong> accounts for Juwa App / Website inboxes, and{' '}
@@ -6015,9 +6384,10 @@ export default function DashboardPage() {
               </div>
             </div>
           </section>
+        )} />
         ) : null}
 
-        {activeTab === 'notify' ? (
+        <StaffTabPanel tab="notify" activeTab={activeTab} mountedTabs={mountedTabs} render={() => (
           <section className="space-y-3 max-w-3xl">
             <p className="text-[12px] text-[#8892b0] leading-relaxed">
               Sends an <strong className="text-[#c4cbe6]">in-app notification</strong> and <strong className="text-[#c4cbe6]">email</strong> to each recipient (bell / Notifications screen).{' '}
@@ -6233,9 +6603,9 @@ export default function DashboardPage() {
               </button>
             </div>
           </section>
-        ) : null}
+        )} />
 
-        {activeTab === 'reports' ? (
+        <StaffTabPanel tab="reports" activeTab={activeTab} mountedTabs={mountedTabs} render={() => (
           <section className="space-y-3">
             {reports.length === 0 ? (
               <p className="text-sm text-[#7d86a8]">No reports for this business.</p>
@@ -6271,7 +6641,7 @@ export default function DashboardPage() {
               </div>
             )}
           </section>
-        ) : null}
+        )} />
           </div>
         </div>
         <footer className="admin-footer hidden lg:flex shrink-0">
@@ -6294,9 +6664,7 @@ export default function DashboardPage() {
             <button
               key={item.id}
               type="button"
-              onClick={() => {
-                setActiveTab(item.id)
-              }}
+              onClick={() => switchTab(item.id)}
               className={`flex flex-col items-center gap-0.5 py-1.5 min-w-0 relative ${
                 active ? 'text-[#f5d040]' : 'text-[#8892b0]'
               }`}
