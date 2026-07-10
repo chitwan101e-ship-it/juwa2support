@@ -86,6 +86,7 @@ import {
   type SupportInboxScope,
 } from '@/lib/supportInboxScope'
 import { isChatComposerSubmitKey } from '@/lib/chatComposerKeyboard'
+import { profileDisplayName, displayNameInitials, oneEmbed } from '@/lib/chatReply'
 import {
   fetchAllBusinessConversations,
   fetchConversationInboxLabels,
@@ -103,6 +104,8 @@ type ProfileRow = {
   id: string
   role: 'customer' | 'business'
   username: string
+  first_name?: string | null
+  last_name?: string | null
   avatar_url?: string | null
   business_id: string | null
   business_role: 'admin' | 'support' | 'technical' | null
@@ -740,6 +743,8 @@ export default function DashboardPage() {
 
   const profileRef = useRef<ProfileRow | null>(null)
   profileRef.current = profile
+  const businessInfoRef = useRef<{ name: string; slug: string } | null>(null)
+  businessInfoRef.current = businessInfo
 
   const scopeInflightRef = useRef<Partial<Record<RefreshScope, boolean>>>({})
   const scopeLoadedAtRef = useRef<Partial<Record<RefreshScope, number>>>({})
@@ -1211,7 +1216,9 @@ export default function DashboardPage() {
           supabase.from('reactions').select('announcement_id, user_id').in('announcement_id', ids).eq('reaction', 'like'),
           supabase
             .from('comments')
-            .select('id, announcement_id, user_id, parent_comment_id, body, created_at, hidden_at')
+            .select(
+              'id, announcement_id, user_id, parent_comment_id, body, created_at, hidden_at, profiles ( username, first_name, last_name, avatar_url, role, business_role )'
+            )
             .in('announcement_id', ids)
             .is('deleted_at', null),
         ])
@@ -1221,19 +1228,80 @@ export default function DashboardPage() {
         for (const c of coms || []) userIds.add((c as { user_id: string }).user_id)
 
         let profileMap = new Map<string, BasicProfile>()
-        if (userIds.size > 0) {
-          const { data: rows } = await supabase
-            .from('profiles')
-            .select('id, username, first_name, last_name, avatar_url, role, business_role')
-            .in('id', [...userIds])
-          profileMap = new Map((rows || []).map((row) => [row.id, row as BasicProfile]))
+        for (const c of coms || []) {
+          const row = c as {
+            user_id: string
+            profiles?: BasicProfile | BasicProfile[] | null
+          }
+          const embed = oneEmbed(row.profiles)
+          if (!embed) continue
+          profileMap.set(row.user_id, {
+            id: row.user_id,
+            username: embed.username ?? '',
+            first_name: embed.first_name ?? null,
+            last_name: embed.last_name ?? null,
+            avatar_url: embed.avatar_url ?? null,
+            role: embed.role,
+            business_role: embed.business_role ?? null,
+          })
         }
 
+        const unresolvedIds = [...userIds].filter((id) => !profileMap.has(id))
+        if (unresolvedIds.length > 0) {
+          try {
+            const res = await fetch('/api/staff/resolve-profiles', {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({ ids: unresolvedIds }),
+            })
+            if (res.ok) {
+              const j = (await res.json()) as { profiles?: BasicProfile[] }
+              for (const row of j.profiles || []) {
+                profileMap.set(row.id, row)
+              }
+            }
+          } catch (e) {
+            console.error('[loadMyAnnouncements] resolve-profiles', e)
+          }
+          const stillMissing = unresolvedIds.filter((id) => !profileMap.has(id))
+          if (stillMissing.length > 0) {
+            const { data: rows, error: profileErr } = await supabase
+              .from('profiles')
+              .select('id, username, first_name, last_name, avatar_url, role, business_role')
+              .in('id', stillMissing)
+            if (profileErr) console.error('[loadMyAnnouncements] profiles', profileErr)
+            for (const row of rows || []) {
+              profileMap.set(row.id, row as BasicProfile)
+            }
+          }
+        }
+
+        const bizName = businessInfoRef.current?.name
         const displayNameFor = (userId: string) => {
-          const p = profileMap.get(userId)
-          if (!p) return 'Member'
-          const full = `${p.first_name ?? ''} ${p.last_name ?? ''}`.trim()
-          return full || `@${p.username}`
+          const mapped = profileMap.get(userId)
+          if (mapped) return profileDisplayName(mapped, { businessName: bizName })
+          const current = profileRef.current
+          if (current?.id === userId) {
+            return profileDisplayName(
+              {
+                username: current.username,
+                first_name: current.first_name,
+                last_name: current.last_name,
+                role: 'business',
+                business_role: current.business_role,
+              },
+              { businessName: bizName }
+            )
+          }
+          return profileDisplayName(null)
+        }
+
+        const avatarFor = (userId: string) => {
+          const fromMap = profileMap.get(userId)?.avatar_url ?? null
+          if (fromMap) return fromMap
+          const current = profileRef.current
+          if (current?.id === userId) return current.avatar_url ?? null
+          return null
         }
 
         const meta: Record<
@@ -1254,7 +1322,7 @@ export default function DashboardPage() {
           if (meta[aid]) {
             meta[aid].likes += 1
             const name = displayNameFor(row.user_id)
-            const avatar = profileMap.get(row.user_id)?.avatar_url ?? null
+            const avatar = avatarFor(row.user_id)
             if (!meta[aid].likedBy.some((x) => x.name === name)) meta[aid].likedBy.push({ name, avatar })
           }
         }
@@ -1277,7 +1345,7 @@ export default function DashboardPage() {
               body: row.body,
               created_at: row.created_at,
               userName: name,
-              userAvatar: profileMap.get(row.user_id)?.avatar_url ?? null,
+              userAvatar: avatarFor(row.user_id),
             })
             meta[aid].commentDetails.push({
               id: row.id,
@@ -1287,8 +1355,9 @@ export default function DashboardPage() {
               created_at: row.created_at,
               hidden_at: (row as { hidden_at?: string | null }).hidden_at ?? null,
               userName: name,
-              userAvatar: profileMap.get(row.user_id)?.avatar_url ?? null,
-              isStaff: profileMap.get(row.user_id)?.role === 'business',
+              userAvatar: avatarFor(row.user_id),
+              isStaff:
+                profileMap.get(row.user_id)?.role === 'business' || profileRef.current?.id === row.user_id,
             })
           }
         }
@@ -1514,7 +1583,9 @@ export default function DashboardPage() {
 
         const { data: prof, error } = await supabase
           .from('profiles')
-          .select('id, role, username, avatar_url, business_id, business_role, support_inbox_scope, deleted_at, account_status')
+          .select(
+            'id, role, username, first_name, last_name, avatar_url, business_id, business_role, support_inbox_scope, deleted_at, account_status'
+          )
           .eq('id', user.id)
           .single()
 
@@ -1539,6 +1610,8 @@ export default function DashboardPage() {
           id: p.id,
           role: p.role,
           username: p.username,
+          first_name: (p as { first_name?: string | null }).first_name ?? null,
+          last_name: (p as { last_name?: string | null }).last_name ?? null,
           avatar_url: p.avatar_url,
           business_id: p.business_id,
           business_role: p.business_role,
@@ -4560,7 +4633,7 @@ export default function DashboardPage() {
                                               />
                                             ) : (
                                               <div className="w-8 h-8 rounded-full bg-[#606770] text-xs font-bold text-slate-900 border border-slate-200 flex items-center justify-center shrink-0">
-                                                {c.userName.slice(0, 2).toUpperCase()}
+                                                {displayNameInitials(c.userName)}
                                               </div>
                                             )}
                                             <div className="min-w-0 flex-1">

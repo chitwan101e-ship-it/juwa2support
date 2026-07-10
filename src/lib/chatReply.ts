@@ -35,14 +35,44 @@ export function formatReplyPreviewText(
   return text.length > 140 ? `${text.slice(0, 137)}…` : text
 }
 
+export type ProfileDisplayNameInput = {
+  username?: string | null
+  first_name?: string | null
+  last_name?: string | null
+  role?: string | null
+  business_role?: string | null
+}
+
+export function profileDisplayName(
+  embed: ProfileDisplayNameInput | null | undefined,
+  options?: { businessName?: string; fallback?: string }
+): string {
+  if (!embed) return options?.fallback ?? 'Member'
+  const name = [embed.first_name, embed.last_name].filter(Boolean).join(' ').trim()
+  if (name) return name
+  const username = embed.username?.trim().replace(/^@+/, '')
+  if (username) return `@${username}`
+  if (embed.role === 'business') return options?.businessName?.trim() || 'Support team'
+  return options?.fallback ?? 'Member'
+}
+
+export function displayNameInitials(label: string): string {
+  const trimmed = label.trim()
+  if (!trimmed || trimmed === 'Member') return '?'
+  if (trimmed.startsWith('@')) {
+    const handle = trimmed.slice(1)
+    return (handle.slice(0, 2) || '?').toUpperCase()
+  }
+  const parts = trimmed.split(/\s+/).filter(Boolean)
+  if (parts.length >= 2) return (parts[0][0] + parts[1][0]).toUpperCase()
+  return (parts[0]?.slice(0, 2) || '?').toUpperCase()
+}
+
 export function replySenderLabel(
   embed: ReplyEmbedProfile | null,
   options?: { isMine?: boolean }
 ): string {
   if (options?.isMine) return 'You'
   if (!embed) return 'Message'
-  const name = [embed.first_name, embed.last_name].filter(Boolean).join(' ').trim()
-  if (name) return name
-  if (embed.username) return `@${embed.username}`
-  return 'Message'
+  return profileDisplayName(embed, { fallback: 'Message' })
 }

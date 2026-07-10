@@ -48,6 +48,8 @@ import {
   formatReplyPreviewText,
   isImageOnlyBody,
   oneEmbed as oneReplyEmbed,
+  profileDisplayName,
+  displayNameInitials,
   replySenderLabel,
   type ReplyEmbedMessage,
 } from '@/lib/chatReply'
@@ -1704,7 +1706,7 @@ export default function FeedPage() {
 
               function renderCommentNode(c: CommentRow, depth: number) {
                 const p = one(c.profiles)
-                const who = p ? `${p.first_name} ${p.last_name}`.trim() || p.username : 'Member'
+                const who = profileDisplayName(p, { businessName: bizName })
                 const kids = byParent.get(c.id) || []
                 const isReplying = replyThreadTarget?.annId === a.id && replyThreadTarget?.parentId === c.id
                 const isOwn = profile?.id === c.user_id
@@ -1721,7 +1723,7 @@ export default function FeedPage() {
                         className="w-8 h-8 rounded-full flex items-center justify-center text-white text-xs font-bold shrink-0"
                         style={{ backgroundColor: '#606770' }}
                       >
-                        {p ? initials(`${p.first_name} ${p.last_name}`) : '?'}
+                        {displayNameInitials(who)}
                       </div>
                     )}
                     <div className="min-w-0 flex-1">
