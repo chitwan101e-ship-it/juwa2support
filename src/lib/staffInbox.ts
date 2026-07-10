@@ -105,6 +105,27 @@ export type InboxLabelAssignmentDef = {
   preset_key?: string | null
 }
 
+/** Fast load of label definitions for a business (small table — do not block on thread fetch). */
+export async function fetchInboxLabelDefinitions(
+  client: SupabaseClient,
+  businessId: string
+): Promise<InboxLabelAssignmentDef[]> {
+  const { data, error } = await client
+    .from('inbox_label_definitions')
+    .select('id, name, color, is_system, preset_key')
+    .eq('business_id', businessId)
+    .order('is_system', { ascending: false })
+    .order('name')
+  if (error) throw error
+  return (data || []).map((r) => ({
+    id: r.id as string,
+    name: r.name as string,
+    color: (r.color as string | null) ?? null,
+    is_system: Boolean(r.is_system),
+    preset_key: (r.preset_key as string | null | undefined) ?? null,
+  }))
+}
+
 /** Chunked load of conversation_inbox_labels (avoids huge .in() failures). */
 export async function fetchConversationInboxLabels(
   client: SupabaseClient,

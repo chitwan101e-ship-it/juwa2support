@@ -57,6 +57,7 @@ import { LinkifiedText } from '@/components/LinkifiedText'
 import { DesktopNotificationPrompt } from '@/components/DesktopNotificationPrompt'
 import { useDesktopMessageNotifications } from '@/hooks/useDesktopMessageNotifications'
 import {
+  INBOX_LABEL_GIVEAWAY,
   INBOX_LABEL_JUWA_APP,
   INBOX_LABEL_TECHNICAL_ESCALATION,
   INBOX_LABEL_UNREAD,
@@ -88,6 +89,7 @@ import { isChatComposerSubmitKey } from '@/lib/chatComposerKeyboard'
 import {
   fetchAllBusinessConversations,
   fetchConversationInboxLabels,
+  fetchInboxLabelDefinitions,
   fetchInboxLatestPreviews,
   fetchInboxUnreadCounts,
 } from '@/lib/staffInbox'
@@ -168,10 +170,21 @@ const DASH_CACHE_TTL_MS = 10 * 60_000
 type DashSessionCache = {
   at: number
   convoList: ConvoListItem[]
+  inboxLabelCatalog?: InboxLabelRow[]
   activeMembers: ActiveMember[]
   suspendedMembers: ActiveMember[]
   pendingCustomers: PendingCustomer[]
   pendingSignupCount: number
+}
+
+function uniqueLabelsFromConvoList(list: ConvoListItem[]): InboxLabelRow[] {
+  const byId = new Map<string, InboxLabelRow>()
+  for (const c of list) {
+    for (const l of c.labels ?? []) {
+      if (!byId.has(l.id)) byId.set(l.id, l)
+    }
+  }
+  return [...byId.values()].sort((a, b) => a.name.localeCompare(b.name))
 }
 
 function dashCacheKey(businessId: string) {
@@ -397,6 +410,7 @@ function threadMatchesInboxTab(
 ): boolean {
   if (tab === 'inbox-technical') {
     if (threadHasChannelLabel(item, INBOX_LABEL_TECHNICAL_ESCALATION)) return true
+    if (threadHasChannelLabel(item, INBOX_LABEL_GIVEAWAY)) return true
     const esc = escalationById[item.id]
     return Boolean(esc && isActiveEscalation(esc.status))
   }
@@ -432,6 +446,15 @@ function displayLabelsForConvo(item: ConvoListItem, unreadDef: InboxLabelRow): I
 
 function threadMatchesUnreadFilter(item: ConvoListItem, unreadLabelId: string): boolean {
   return item.unreadCount > 0 || item.labels.some((l) => l.preset_key === INBOX_LABEL_UNREAD || l.id === unreadLabelId)
+}
+
+/** Nav badges: count customers waiting for a reply, not individual unread messages. */
+function countInboxThreadsWithUnread(
+  list: ConvoListItem[],
+  tab: AppTab,
+  escalationById: Record<string, EscalationRow>
+): number {
+  return list.filter((c) => threadMatchesInboxTab(c, tab, escalationById) && c.unreadCount > 0).length
 }
 
 const APP_VERSION = '1.0.0'
@@ -650,6 +673,8 @@ export default function DashboardPage() {
   const [staffNotifyUnread, setStaffNotifyUnread] = useState(0)
   const [inboxRefreshing, setInboxRefreshing] = useState(false)
   const [inboxLabelCatalog, setInboxLabelCatalog] = useState<InboxLabelRow[]>([])
+  const inboxLabelCatalogRef = useRef<InboxLabelRow[]>([])
+  inboxLabelCatalogRef.current = inboxLabelCatalog
   const [inboxLabelsPopoverOpen, setInboxLabelsPopoverOpen] = useState(false)
   const inboxLabelsPopoverRef = useRef<HTMLDivElement>(null)
   const [inboxLabelRowBusy, setInboxLabelRowBusy] = useState<string | null>(null)
@@ -829,6 +854,20 @@ export default function DashboardPage() {
           setBusinessInfo(bizRow ? { name: bizRow.name, slug: bizRow.slug } : null)
         }
 
+        let labelCatalogPromise: Promise<InboxLabelRow[] | null> | null = null
+        if (wantInbox) {
+          labelCatalogPromise = fetchInboxLabelDefinitions(supabase, bid)
+            .then((rows) => {
+              setInboxLabelCatalog(rows)
+              return rows
+            })
+            .catch((labelErr) => {
+              const msg = labelErr instanceof Error ? labelErr.message : 'label catalog load failed'
+              setLoadError((prev) => (prev ? `${prev} · ` : '') + `inbox_label_definitions: ${msg}`)
+              return null
+            })
+        }
+
         const shouldFetchPending = wantBell || wantMembers || wantPendingDetail
         const pendingUrl = wantPendingDetail
           ? '/api/staff/pending-signups'
@@ -985,25 +1024,14 @@ export default function DashboardPage() {
 
           const unreadByConvo = await fetchInboxUnreadCounts(supabase, convoRows)
 
-          const { data: defRows, error: defErr } = await supabase
-            .from('inbox_label_definitions')
-            .select('id, name, color, is_system, preset_key')
-            .eq('business_id', bid)
-            .order('is_system', { ascending: false })
-            .order('name')
-          if (defErr)
-            setLoadError((prev) => (prev ? `${prev} · ` : '') + `inbox_label_definitions: ${defErr.message}`)
-          const labelCatalog: InboxLabelRow[] = (defRows || []).map((r: Record<string, unknown>) => ({
-            id: r.id as string,
-            name: r.name as string,
-            color: (r.color as string | null) ?? null,
-            is_system: Boolean(r.is_system),
-            preset_key: (r.preset_key as string | null | undefined) ?? null,
-          }))
-          setInboxLabelCatalog(labelCatalog)
+          const labelCatalog =
+            (labelCatalogPromise ? await labelCatalogPromise : null) ??
+            inboxLabelCatalogRef.current ??
+            []
+          if (labelCatalog.length > 0) setInboxLabelCatalog(labelCatalog)
           const defById = Object.fromEntries(labelCatalog.map((d) => [d.id, d])) as Record<string, InboxLabelRow>
           let labelsByConvo: Record<string, InboxLabelRow[]> = {}
-          if (convIds.length > 0 && !defErr) {
+          if (convIds.length > 0 && labelCatalog.length > 0) {
             try {
               labelsByConvo = await fetchConversationInboxLabels(supabase, convIds, defById)
             } catch (labelLoadErr) {
@@ -1115,6 +1143,7 @@ export default function DashboardPage() {
 
         writeDashCache(bid, {
           convoList: wantInbox ? list : convoListRef.current,
+          inboxLabelCatalog: inboxLabelCatalogRef.current,
           activeMembers: wantMembers ? nextActive : activeMembersRef.current,
           suspendedMembers: wantMembers ? nextSuspended : suspendedMembersRef.current,
           pendingCustomers: wantPendingDetail && pendingRes.pending ? pendingRes.pending : pendingCustomersRef.current,
@@ -1532,6 +1561,16 @@ export default function DashboardPage() {
               labels: c.labels ?? [],
             }))
           )
+          const cachedLabels =
+            cached.inboxLabelCatalog?.length
+              ? cached.inboxLabelCatalog
+              : uniqueLabelsFromConvoList(
+                  cached.convoList.map((c) => ({
+                    ...c,
+                    labels: c.labels ?? [],
+                  }))
+                )
+          if (cachedLabels.length > 0) setInboxLabelCatalog(cachedLabels)
           setActiveMembers(cached.activeMembers)
           setSuspendedMembers(cached.suspendedMembers)
           setPendingCustomers(cached.pendingCustomers ?? [])
@@ -1817,7 +1856,7 @@ export default function DashboardPage() {
           if (threadReloadDebounceRef.current) window.clearTimeout(threadReloadDebounceRef.current)
           threadReloadDebounceRef.current = window.setTimeout(() => {
             threadReloadDebounceRef.current = null
-            void reloadThreadMessages(cid, { markRead: isActivelyViewingInboxThread(cid) })
+            void reloadThreadMessages(cid, { markRead: false })
           }, 280)
         }
       )
@@ -2793,6 +2832,16 @@ export default function DashboardPage() {
       customerId
     )
     if (readErr) console.error(readErr)
+    const readAt = new Date().toISOString()
+    if (selectedConvoIdRef.current === conversationId) {
+      setThreadMessages((prev) =>
+        prev.map((m) =>
+          m.sender_id === customerId && m.read !== true
+            ? { ...m, read: true, read_at: readAt }
+            : m
+        )
+      )
+    }
     setConvoList((prev) =>
       prev.map((c) =>
         c.id === conversationId
@@ -2888,27 +2937,15 @@ export default function DashboardPage() {
     clearReplyPendingImage()
     const conv = convoListRef.current.find((c) => c.id === conversationId)
     setStaffGameUsernameDraft(conv?.staffGameUsername ?? '')
-    await reloadThreadMessages(conversationId, { markRead: true, showLoading: true })
+    await reloadThreadMessages(conversationId, { markRead: false, showLoading: true })
   }
 
-  /** Mark unread customer messages when the admin returns to Inbox with a thread still open. */
-  useEffect(() => {
-    if (!isInboxTab(activeTab) || !selectedConvoId) return
-    const cid = selectedConvoId
-    void (async () => {
-      const { data: convoMeta, error: convoErr } = await supabase
-        .from('conversations')
-        .select('customer_id')
-        .eq('id', cid)
-        .maybeSingle()
-      if (convoErr) {
-        console.error(convoErr)
-        return
-      }
-      const customerId = convoMeta?.customer_id as string | undefined
-      if (customerId) await markActiveThreadRead(cid, customerId)
-    })()
-  }, [activeTab, selectedConvoId, supabase])
+  async function markSelectedThreadReadWithoutReply() {
+    if (!selectedConvoId) return
+    const conv = convoListRef.current.find((c) => c.id === selectedConvoId)
+    if (!conv || conv.unreadCount <= 0) return
+    await markActiveThreadRead(selectedConvoId, conv.customer_id)
+  }
 
   async function onReplyImagePick(e: ChangeEvent<HTMLInputElement>) {
     const f = e.target.files?.[0]
@@ -2990,36 +3027,40 @@ export default function DashboardPage() {
     await supabase.from('conversations').update({ updated_at: new Date().toISOString() }).eq('id', conversationId)
 
     if (!isInternal) {
-    const row = data as { body: string }
-    let preview = (row.body ?? '').trim().slice(0, 160)
-    if (!preview) preview = '?? Reply'
-    void fetch('/api/staff/notify-customer-reply', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ conversationId, preview }),
-    }).then(async (res) => {
-      if (res.ok) return
-      const j = (await res.json().catch(() => ({}))) as { error?: string }
-      console.error('notify-customer-reply failed:', res.status, j.error ?? j)
-      if (!p.business_id) return
-      const { data: convo, error: convoErr } = await supabase
-        .from('conversations')
-        .select('customer_id')
-        .eq('id', conversationId)
-        .single()
-      if (convoErr || !(convo as { customer_id?: string } | null)?.customer_id) return
-      const customerId = (convo as { customer_id: string }).customer_id
-      const { error: nErr } = await supabase.from('notifications').insert({
-        user_id: customerId,
-        business_id: p.business_id,
-        type: 'support_reply',
-        title: 'New reply from the team',
-        body: preview,
-        link: '/feed',
-        conversation_id: conversationId,
+      const conv = convoListRef.current.find((c) => c.id === conversationId)
+      if (conv && conv.unreadCount > 0) {
+        await markActiveThreadRead(conversationId, conv.customer_id)
+      }
+      const row = data as { body: string }
+      let preview = (row.body ?? '').trim().slice(0, 160)
+      if (!preview) preview = '?? Reply'
+      void fetch('/api/staff/notify-customer-reply', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ conversationId, preview }),
+      }).then(async (res) => {
+        if (res.ok) return
+        const j = (await res.json().catch(() => ({}))) as { error?: string }
+        console.error('notify-customer-reply failed:', res.status, j.error ?? j)
+        if (!p.business_id) return
+        const { data: convo, error: convoErr } = await supabase
+          .from('conversations')
+          .select('customer_id')
+          .eq('id', conversationId)
+          .single()
+        if (convoErr || !(convo as { customer_id?: string } | null)?.customer_id) return
+        const customerId = (convo as { customer_id: string }).customer_id
+        const { error: nErr } = await supabase.from('notifications').insert({
+          user_id: customerId,
+          business_id: p.business_id,
+          type: 'support_reply',
+          title: 'New reply from the team',
+          body: preview,
+          link: '/feed',
+          conversation_id: conversationId,
+        })
+        if (nErr) console.error('fallback customer notification insert:', nErr)
       })
-      if (nErr) console.error('fallback customer notification insert:', nErr)
-    })
     }
 
     return msg
@@ -3619,26 +3660,17 @@ export default function DashboardPage() {
   const needsNotifyLists = activeTab === 'notify'
 
   const inboxWebsiteUnreadTotal = useMemo(
-    () =>
-      convoList
-        .filter((c) => threadMatchesInboxTab(c, 'inbox-website', escalationByConvoId))
-        .reduce((sum, c) => sum + c.unreadCount, 0),
+    () => countInboxThreadsWithUnread(convoList, 'inbox-website', escalationByConvoId),
     [convoList, escalationByConvoId]
   )
 
   const inboxAppUnreadTotal = useMemo(
-    () =>
-      convoList
-        .filter((c) => threadMatchesInboxTab(c, 'inbox-app', escalationByConvoId))
-        .reduce((sum, c) => sum + c.unreadCount, 0),
+    () => countInboxThreadsWithUnread(convoList, 'inbox-app', escalationByConvoId),
     [convoList, escalationByConvoId]
   )
 
   const inboxTechnicalUnreadTotal = useMemo(
-    () =>
-      convoList
-        .filter((c) => threadMatchesInboxTab(c, 'inbox-technical', escalationByConvoId))
-        .reduce((sum, c) => sum + c.unreadCount, 0),
+    () => countInboxThreadsWithUnread(convoList, 'inbox-technical', escalationByConvoId),
     [convoList, escalationByConvoId]
   )
 
@@ -3733,14 +3765,27 @@ export default function DashboardPage() {
 
   const inboxDisplayList = useMemo(() => {
     if (!needsInboxLists) return []
-    if (inboxThreadLabelFilterIds.length === 0) return channelFilteredConvoList
-    return channelFilteredConvoList.filter((c) =>
-      inboxThreadLabelFilterIds.some((lid) => {
-        if (lid === unreadLabelDef.id) return threadMatchesUnreadFilter(c, unreadLabelDef.id)
-        return c.labels.some((l) => l.id === lid)
-      })
-    )
-  }, [channelFilteredConvoList, inboxThreadLabelFilterIds, unreadLabelDef.id, needsInboxLists])
+    let list =
+      inboxThreadLabelFilterIds.length === 0
+        ? channelFilteredConvoList
+        : channelFilteredConvoList.filter((c) =>
+            inboxThreadLabelFilterIds.some((lid) => {
+              if (lid === unreadLabelDef.id) return threadMatchesUnreadFilter(c, unreadLabelDef.id)
+              return c.labels.some((l) => l.id === lid)
+            })
+          )
+    if (selectedConvoId && !list.some((c) => c.id === selectedConvoId)) {
+      const pinned = channelFilteredConvoList.find((c) => c.id === selectedConvoId)
+      if (pinned) list = [pinned, ...list]
+    }
+    return list
+  }, [
+    channelFilteredConvoList,
+    inboxThreadLabelFilterIds,
+    unreadLabelDef.id,
+    needsInboxLists,
+    selectedConvoId,
+  ])
 
   /** Drop open thread when it falls outside the active channel or label filter. */
   useEffect(() => {
@@ -4226,7 +4271,7 @@ export default function DashboardPage() {
                       }}
                       className="w-full text-left px-3 py-2.5 flex items-start gap-2 hover:bg-slate-50 transition-colors"
                     >
-                      <div className="w-9 h-9 rounded-[10px] bg-slate-100 flex items-center justify-center shrink-0 relative overflow-hidden border border-slate-200 text-xs font-bold text-slate-900">
+                      <div className="relative w-9 h-9 shrink-0 rounded-[10px] bg-slate-100 flex items-center justify-center overflow-hidden border border-slate-200 text-xs font-bold text-slate-900">
                         {item.customerAvatar ? (
                           <img
                             src={item.customerAvatar}
@@ -4237,7 +4282,7 @@ export default function DashboardPage() {
                           item.customerName.slice(0, 2).toUpperCase()
                         )}
                         {item.unreadCount > 0 ? (
-                          <span className="absolute -top-1 -right-1 min-w-3.5 h-3.5 px-0.5 rounded-full bg-[#ff3b5c] text-slate-900 text-[8px] font-bold flex items-center justify-center leading-none tabular-nums border-2 border-[#000000]">
+                          <span className="absolute top-0.5 right-0.5 z-10 min-w-3.5 h-3.5 px-0.5 rounded-full bg-[#ff3b5c] text-white text-[8px] font-bold flex items-center justify-center leading-none tabular-nums ring-2 ring-white">
                             {item.unreadCount > 9 ? '9+' : item.unreadCount}
                           </span>
                         ) : null}
@@ -4742,7 +4787,7 @@ export default function DashboardPage() {
                       : activeTab === 'inbox-app'
                         ? inboxAppUnreadTotal
                         : inboxTechnicalUnreadTotal}{' '}
-                    new
+                    waiting
                   </span>
                 ) : null}
                 <span className="text-[12px] text-slate-600 tabular-nums font-medium">
@@ -4887,7 +4932,7 @@ export default function DashboardPage() {
                               : activeTab === 'inbox-app'
                                 ? 'No Juwa App support threads yet. Threads appear here when customers sign in from the game app.'
                                 : activeTab === 'inbox-technical'
-                                  ? 'No technical escalations yet. Support staff can escalate threads from Website or Juwa App inboxes.'
+                                  ? 'No technical escalations or giveaway threads yet. Escalated threads and any thread mentioning a giveaway appear here.'
                                   : 'No website support threads yet. Threads appear here when customers sign up on the website or message from the feed.'}
                         </p>
                         {inboxSearchMemberMatches.length > 0 ? (
@@ -5008,6 +5053,16 @@ export default function DashboardPage() {
                             </div>
                           </div>
                           <div className="flex items-center gap-0.5 shrink-0 relative">
+                            {selectedConvo.unreadCount > 0 ? (
+                              <button
+                                type="button"
+                                onClick={() => void markSelectedThreadReadWithoutReply()}
+                                className="inline-flex items-center gap-1 px-2 py-1.5 rounded-lg border border-slate-200 bg-slate-50 text-[11px] font-semibold text-slate-700 hover:bg-slate-100"
+                                title="Clear unread without sending a reply (e.g. handled by phone)"
+                              >
+                                Mark read
+                              </button>
+                            ) : null}
                             {canEscalateThread(profile.business_role, threadIsTechnicallyEscalated) ? (
                               <button
                                 type="button"

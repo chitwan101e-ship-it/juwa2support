@@ -5,6 +5,7 @@ export const INBOX_LABEL_WEBSITE = 'support_website'
 export const INBOX_LABEL_JUWA_APP = 'support_juwa_app'
 export const INBOX_LABEL_UNREAD = 'unread'
 export const INBOX_LABEL_TECHNICAL_ESCALATION = 'technical_escalation'
+export const INBOX_LABEL_GIVEAWAY = 'giveaway'
 
 /** Labels managed automatically by the database (staff cannot toggle manually). */
 export const AUTO_MANAGED_INBOX_LABEL_PRESETS = new Set([
