@@ -73,7 +73,14 @@ import {
   type EscalationRow,
 } from '@/lib/technicalEscalation'
 import { mergeChatMessages } from '@/lib/mergeChatMessages'
-import { formatReplyPreviewText, isImageOnlyBody, oneEmbed as oneReplyEmbed, type ReplyEmbedMessage } from '@/lib/chatReply'
+import {
+  displayNameInitials,
+  formatReplyPreviewText,
+  isImageOnlyBody,
+  oneEmbed as oneReplyEmbed,
+  profileDisplayName,
+  type ReplyEmbedMessage,
+} from '@/lib/chatReply'
 import {
   conversationMatchesScope,
   defaultInboxTabForScope,
@@ -86,7 +93,6 @@ import {
   type SupportInboxScope,
 } from '@/lib/supportInboxScope'
 import { isChatComposerSubmitKey } from '@/lib/chatComposerKeyboard'
-import { profileDisplayName, displayNameInitials, oneEmbed } from '@/lib/chatReply'
 import {
   fetchAllBusinessConversations,
   fetchConversationInboxLabels,
@@ -286,6 +292,8 @@ type BasicProfile = {
   role?: string
   business_role?: string | null
 }
+
+type CommentProfileEmbed = Omit<BasicProfile, 'id'>
 
 type CommentPreview = {
   id: string
@@ -1231,7 +1239,7 @@ export default function DashboardPage() {
         for (const c of coms || []) {
           const row = c as {
             user_id: string
-            profiles?: BasicProfile | BasicProfile[] | null
+            profiles?: CommentProfileEmbed | CommentProfileEmbed[] | null
           }
           const embed = oneEmbed(row.profiles)
           if (!embed) continue
