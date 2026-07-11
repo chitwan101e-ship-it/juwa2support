@@ -459,6 +459,10 @@ function threadMatchesUnreadFilter(item: ConvoListItem, unreadLabelId: string): 
   return item.unreadCount > 0 || item.labels.some((l) => l.preset_key === INBOX_LABEL_UNREAD || l.id === unreadLabelId)
 }
 
+function conversationHasUnreadState(item: ConvoListItem): boolean {
+  return item.unreadCount > 0 || item.labels.some((l) => l.preset_key === INBOX_LABEL_UNREAD)
+}
+
 /** Nav badges: count customers waiting for a reply, not individual unread messages. */
 function countInboxThreadsWithUnread(
   list: ConvoListItem[],
@@ -759,6 +763,9 @@ export default function DashboardPage() {
   const refreshDashboardRef = useRef<
     (p: ProfileRow, opts?: { scope?: RefreshScope; pendingDetail?: boolean; force?: boolean }) => Promise<void>
   >(async () => {})
+  const markActiveThreadReadRef = useRef<(conversationId: string, customerId: string) => Promise<void>>(
+    async () => {}
+  )
 
   const scrollThreadToLatest = useCallback((behavior: ScrollBehavior = 'auto') => {
     const el = threadScrollRef.current
@@ -1768,9 +1775,16 @@ export default function DashboardPage() {
       const conv = convoListRef.current.find((c) => c.id === msg.conversation_id)
       if (!conv || msg.sender_id !== conv.customer_id) return
       setConvoList((list) =>
-        list.map((c) =>
-          c.id === msg.conversation_id ? { ...c, unreadCount: Math.max(0, c.unreadCount - 1) } : c
-        )
+        list.map((c) => {
+          if (c.id !== msg.conversation_id) return c
+          const nextCount = Math.max(0, c.unreadCount - 1)
+          return {
+            ...c,
+            unreadCount: nextCount,
+            labels:
+              nextCount === 0 ? c.labels.filter((l) => l.preset_key !== INBOX_LABEL_UNREAD) : c.labels,
+          }
+        })
       )
     }
 
@@ -1786,6 +1800,9 @@ export default function DashboardPage() {
       const conv = convoListRef.current.find((c) => c.id === msg.conversation_id)
       if (!conv || msg.sender_id !== conv.customer_id) return false
       const viewing = isActivelyViewingInboxThread(msg.conversation_id)
+      if (viewing) {
+        void markActiveThreadReadRef.current(msg.conversation_id, conv.customer_id)
+      }
       setConvoList((prev) => {
         const idx = prev.findIndex((c) => c.id === msg.conversation_id)
         if (idx < 0) return prev
@@ -1795,7 +1812,8 @@ export default function DashboardPage() {
           ...cur,
           preview,
           updated_at: msg.created_at ?? new Date().toISOString(),
-          unreadCount: viewing ? cur.unreadCount : cur.unreadCount + 1,
+          unreadCount: viewing ? 0 : cur.unreadCount + 1,
+          labels: viewing ? cur.labels.filter((l) => l.preset_key !== INBOX_LABEL_UNREAD) : cur.labels,
         }
         const next = [...prev]
         next.splice(idx, 1)
@@ -1937,7 +1955,7 @@ export default function DashboardPage() {
           if (threadReloadDebounceRef.current) window.clearTimeout(threadReloadDebounceRef.current)
           threadReloadDebounceRef.current = window.setTimeout(() => {
             threadReloadDebounceRef.current = null
-            void reloadThreadMessages(cid, { markRead: false })
+            void reloadThreadMessages(cid, { markRead: true })
           }, 280)
         }
       )
@@ -2935,16 +2953,20 @@ export default function DashboardPage() {
       )
     )
     if (p?.id) {
-      const { errorMessage: nErr } = await markConversationNotificationsRead(supabase, p.id, conversationId)
-      if (nErr) console.error(nErr)
-      const { count } = await supabase
-        .from('notifications')
-        .select('*', { count: 'exact', head: true })
-        .eq('user_id', p.id)
-        .eq('read', false)
-      setStaffNotifyUnread(count ?? 0)
+      void (async () => {
+        const { errorMessage: nErr } = await markConversationNotificationsRead(supabase, p.id, conversationId)
+        if (nErr) console.error(nErr)
+        const { count } = await supabase
+          .from('notifications')
+          .select('*', { count: 'exact', head: true })
+          .eq('user_id', p.id)
+          .eq('read', false)
+        setStaffNotifyUnread(count ?? 0)
+      })()
     }
   }
+
+  markActiveThreadReadRef.current = markActiveThreadRead
 
   async function saveStaffGameUsername() {
     if (!selectedConvoId || !profile) return
@@ -3018,13 +3040,13 @@ export default function DashboardPage() {
     clearReplyPendingImage()
     const conv = convoListRef.current.find((c) => c.id === conversationId)
     setStaffGameUsernameDraft(conv?.staffGameUsername ?? '')
-    await reloadThreadMessages(conversationId, { markRead: false, showLoading: true })
+    await reloadThreadMessages(conversationId, { markRead: true, showLoading: true })
   }
 
   async function markSelectedThreadReadWithoutReply() {
     if (!selectedConvoId) return
     const conv = convoListRef.current.find((c) => c.id === selectedConvoId)
-    if (!conv || conv.unreadCount <= 0) return
+    if (!conv || !conversationHasUnreadState(conv)) return
     await markActiveThreadRead(selectedConvoId, conv.customer_id)
   }
 
@@ -3105,12 +3127,12 @@ export default function DashboardPage() {
       setThreadMessages((prev) => [...prev, msg])
     }
 
-    await supabase.from('conversations').update({ updated_at: new Date().toISOString() }).eq('id', conversationId)
+    void supabase.from('conversations').update({ updated_at: new Date().toISOString() }).eq('id', conversationId)
 
     if (!isInternal) {
       const conv = convoListRef.current.find((c) => c.id === conversationId)
-      if (conv && conv.unreadCount > 0) {
-        await markActiveThreadRead(conversationId, conv.customer_id)
+      if (conv) {
+        void markActiveThreadRead(conversationId, conv.customer_id)
       }
       const row = data as { body: string }
       let preview = (row.body ?? '').trim().slice(0, 160)
@@ -3192,7 +3214,7 @@ export default function DashboardPage() {
         replyToMessageId: isInternal ? null : replyTarget?.id ?? null,
       })
       if (!msg) return
-      await refreshDashboard(profileRef.current!, { scope: 'inbox' })
+      void refreshDashboard(profileRef.current!, { scope: 'inbox' })
     } catch (e) {
       console.error(e)
       if (text) setReplyDraft(text)
@@ -3261,7 +3283,7 @@ export default function DashboardPage() {
       const msg = await insertStaffMessageToConversation(conversationId, draft, null)
       if (!msg) return
       setMemberComposeOpenId(null)
-      await refreshDashboard(profileRef.current!, { scope: 'inbox' })
+      void refreshDashboard(profileRef.current!, { scope: 'inbox' })
     } catch (e) {
       console.error(e)
       setMemberMessageDrafts((prev) => ({ ...prev, [customerId]: draft }))
@@ -3279,7 +3301,11 @@ export default function DashboardPage() {
     try {
       await refreshDashboard(p, { scope: 'inbox', force: true })
       const cid = selectedConvoIdRef.current
-      if (cid) await reloadThreadMessages(cid, { markRead: false })
+      if (cid && isActivelyViewingInboxThread(cid)) {
+        await reloadThreadMessages(cid, { markRead: true })
+      } else if (cid) {
+        await reloadThreadMessages(cid, { markRead: false })
+      }
     } finally {
       setInboxRefreshing(false)
     }
@@ -5134,7 +5160,7 @@ export default function DashboardPage() {
                             </div>
                           </div>
                           <div className="flex items-center gap-0.5 shrink-0 relative">
-                            {selectedConvo.unreadCount > 0 ? (
+                            {conversationHasUnreadState(selectedConvo) ? (
                               <button
                                 type="button"
                                 onClick={() => void markSelectedThreadReadWithoutReply()}
