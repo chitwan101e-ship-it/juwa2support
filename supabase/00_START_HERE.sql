@@ -1,0 +1,49 @@
+-- =============================================================================
+-- Juwa2 Customer Support — Supabase SQL setup (READ THIS FIRST)
+-- =============================================================================
+--
+-- Run IN ORDER in Supabase → SQL Editor (one file at a time):
+--
+--   SCENARIO A — Brand-new empty Supabase project
+--     1) Skip 1_reset.sql
+--     2) Run  2_bootstrap.sql
+--     3) Run  3_extras.sql
+--     4) Run  5_game_sso.sql   (in-app game chat SSO)
+--     5) Run  6_channel_labels.sql  (Website / Juwa App inbox labels)
+--     6) Run  6b_backfill_channel_labels.sql  (tag existing threads — optional)
+--     7) Run  6_auto_approve_customers.sql  (instant customer signup approval)
+--     8) Run  7_unread_inbox_label.sql  (auto Unread label on unread customer messages)
+--     9) Run  8_staff_inbox_scope.sql  (assign support staff to Website / App / Both inboxes)
+--    10) Run  9a_technical_role_enum.sql  (ALONE — adds technical role enum value)
+--    11) Run  9_technical_escalations.sql  (support → technical handoff queue)
+--    12) Run  9b_technical_escalation_label_access.sql  (technical inbox sees labeled threads)
+--    13) Run  10_message_update_touch_conversation.sql  (inbox ordering on read receipts)
+--    14) Run  11_chat_replies_and_staff_notes.sql  (reply-to messages + game username note)
+--    15) Run  12_performance_indexes.sql  (inbox unread RPC + performance indexes)
+--    16) Run  13_inbox_giveaway_label.sql  (auto Giveaway label + technical inbox visibility)
+--    17) Run  14_comment_author_display.sql  (comment author display metadata)
+--    18) Run  15_support_tickets.sql  (ticket number + issue + photos table)
+--    19) Run  16_support_ticket_occurred_at.sql  (adds "when did it happen" column to tickets)
+--    20) Run  17_support_ticket_multiple_images.sql  (multiple uploaded, pasted, or chat images)
+--    21) Run  18_support_ticket_shared_notes.sql  (legacy — superseded by step 24)
+--    22) Run  19_support_ticket_unread_events.sql  (legacy — superseded by step 24)
+--    23) Run  20_support_ticket_performance.sql  (indexes for paginated ticket lists)
+--    24) Run  21_simplify_tickets_for_signal.sql  (undo handoff notes/unread; simple Signal tickets)
+--    25) Run  22_easy_ticket_numbers_and_customer_name.sql  (J2-1 style numbers + customer name)
+--
+--   SCENARIO B — Bootstrap already ran; "already exists" / policy errors
+--     Run 3_extras.sql, 5_game_sso.sql, and 6_auto_approve_customers.sql as needed  (safe to re-run)
+--
+--   SCENARIO C — Wipe app data and start over (keeps auth.users)
+--     1) Run  1_reset.sql
+--     2) Run  2_bootstrap.sql
+--     3) Run  3_extras.sql
+--
+-- Do NOT run schema.sql — use the numbered files above.
+--
+-- ADMIN LOGIN (password lives in Supabase Auth, not in your project folder):
+--   1) Dashboard → Authentication → Users → Add user
+--        juwa2support@gmail.com + password + Auto Confirm User
+--   2) SQL Editor → run 4_create_admin.sql
+--   3) Sign in at your app /login → opens /dashboard
+-- =============================================================================
