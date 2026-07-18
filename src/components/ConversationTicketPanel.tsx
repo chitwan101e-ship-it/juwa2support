@@ -12,8 +12,10 @@ import {
 import {
   Check,
   Clipboard,
+  ClipboardPaste,
   Copy,
   ImagePlus,
+  Images,
   Loader2,
   Ticket as TicketIcon,
   X,
@@ -178,7 +180,17 @@ export function ConversationTicketPanel({
     )
     if (files.length === 0) return
     event.preventDefault()
-    await addImageFiles(files)
+    event.stopPropagation()
+    // Some browsers expose the same clipboard image more than once — keep unique blobs.
+    const unique: File[] = []
+    const seen = new Set<string>()
+    for (const file of files) {
+      const key = `${file.name}|${file.size}|${file.type}|${file.lastModified}`
+      if (seen.has(key)) continue
+      seen.add(key)
+      unique.push(file)
+    }
+    await addImageFiles(unique)
   }
 
   function toggleChatImage(image: ExistingChatImage) {
@@ -433,19 +445,28 @@ export function ConversationTicketPanel({
               />
             </label>
 
-            <section className="space-y-2">
-              <div className="flex flex-wrap items-center justify-between gap-2">
-                <div>
-                  <p className="text-[11px] font-semibold text-slate-700">
-                    Photos ({attachments.length}/{MAX_TICKET_IMAGES})
-                  </p>
-                  <p className="text-[10px] text-slate-500">
-                    Paste with Ctrl+V, upload, or tap a chat photo below.
-                  </p>
-                </div>
-                <label className="inline-flex cursor-pointer items-center gap-1.5 rounded-lg border border-slate-200 px-3 py-2 text-[11px] font-semibold text-slate-600 hover:bg-slate-50">
-                  <ImagePlus className="h-4 w-4" />
-                  Upload
+            <section className="space-y-3">
+              <div>
+                <p className="text-[11px] font-semibold text-slate-700">
+                  Photos ({attachments.length}/{MAX_TICKET_IMAGES})
+                </p>
+                <p className="text-[10px] text-slate-500">
+                  Three ways to add photos — Upload is only for files on this computer.
+                </p>
+              </div>
+
+              <div className="grid gap-2 sm:grid-cols-2">
+                <label className="flex cursor-pointer flex-col gap-1 rounded-xl border border-slate-200 bg-slate-50 px-3 py-3 hover:border-violet-300 hover:bg-violet-50/40">
+                  <span className="inline-flex items-center gap-1.5 text-[11px] font-semibold text-slate-800">
+                    <ImagePlus className="h-4 w-4 text-violet-600" />
+                    1. From this computer
+                  </span>
+                  <span className="text-[10px] text-slate-500">
+                    Opens your file picker (desktop / downloads).
+                  </span>
+                  <span className="mt-1 inline-flex w-fit items-center gap-1.5 rounded-lg border border-slate-200 bg-white px-2.5 py-1.5 text-[10px] font-semibold text-slate-700">
+                    Choose files
+                  </span>
                   <input
                     type="file"
                     multiple
@@ -454,82 +475,114 @@ export function ConversationTicketPanel({
                     onChange={(event) => void onImagePick(event)}
                   />
                 </label>
+
+                <div
+                  className="flex flex-col gap-1 rounded-xl border border-dashed border-violet-300 bg-violet-50/50 px-3 py-3"
+                  onPaste={(event) => void onPasteImages(event)}
+                  tabIndex={0}
+                  role="group"
+                  aria-label="Paste screenshot area"
+                >
+                  <span className="inline-flex items-center gap-1.5 text-[11px] font-semibold text-slate-800">
+                    <ClipboardPaste className="h-4 w-4 text-violet-600" />
+                    2. Paste a screenshot
+                  </span>
+                  <span className="text-[10px] text-slate-500">
+                    Copy an image, click here, then press Ctrl+V (Cmd+V on Mac).
+                  </span>
+                </div>
+              </div>
+
+              <div className="rounded-xl border border-slate-200 bg-white px-3 py-3">
+                <div className="mb-2 flex items-center gap-1.5">
+                  <Images className="h-4 w-4 text-violet-600" />
+                  <p className="text-[11px] font-semibold text-slate-800">
+                    3. From this chat’s history
+                  </p>
+                </div>
+                {existingChatImages.length > 0 ? (
+                  <>
+                    <p className="mb-2 text-[10px] text-slate-500">
+                      Tap a photo below to attach it to the ticket.
+                    </p>
+                    <div className="flex gap-2 overflow-x-auto pb-1">
+                      {existingChatImages.map((chatImage) => {
+                        const selected = attachments.some(
+                          (attachment) =>
+                            attachment.kind === 'chat' && attachment.id === chatImage.id
+                        )
+                        return (
+                          <button
+                            key={chatImage.id}
+                            type="button"
+                            onClick={() => toggleChatImage(chatImage)}
+                            className={`relative h-20 w-20 shrink-0 overflow-hidden rounded-xl border-2 bg-slate-100 ${
+                              selected
+                                ? 'border-violet-600 ring-2 ring-violet-200'
+                                : 'border-slate-200'
+                            }`}
+                            title={`Chat image · ${new Date(chatImage.createdAt).toLocaleString()}`}
+                          >
+                            <ChatMessageImage
+                              imageUrl={chatImage.imageUrl}
+                              alt="Chat attachment"
+                              className="h-full w-full object-cover"
+                              interactive={false}
+                            />
+                            {selected ? (
+                              <span className="absolute inset-x-0 bottom-0 bg-violet-600 py-0.5 text-[9px] font-bold text-white">
+                                Added
+                              </span>
+                            ) : null}
+                          </button>
+                        )
+                      })}
+                    </div>
+                  </>
+                ) : (
+                  <p className="rounded-lg bg-slate-50 px-3 py-2.5 text-[10px] text-slate-500">
+                    No photos in this chat yet. When the customer (or staff) sends an image
+                    here, it will show up for one-tap attach.
+                  </p>
+                )}
               </div>
 
               {attachments.length > 0 ? (
-                <div className="grid grid-cols-3 gap-2 sm:grid-cols-5">
-                  {attachments.map((attachment, index) => (
-                    <div
-                      key={attachment.id}
-                      className="relative aspect-square overflow-hidden rounded-xl border border-slate-200 bg-slate-50"
-                    >
-                      {attachment.kind === 'upload' ? (
-                        // eslint-disable-next-line @next/next/no-img-element
-                        <img
-                          src={attachment.previewUrl}
-                          alt={`Photo ${index + 1}`}
-                          className="h-full w-full object-cover"
-                        />
-                      ) : (
-                        <ChatMessageImage
-                          imageUrl={attachment.imageUrl}
-                          alt={`Photo ${index + 1}`}
-                          className="h-full w-full object-cover"
-                          interactive={false}
-                        />
-                      )}
-                      <button
-                        type="button"
-                        onClick={() => removeAttachment(attachment.id)}
-                        className="absolute right-1 top-1 rounded-full bg-black/70 p-1 text-white hover:bg-black"
-                        aria-label={`Remove photo ${index + 1}`}
-                      >
-                        <X className="h-3.5 w-3.5" />
-                      </button>
-                    </div>
-                  ))}
-                </div>
-              ) : (
-                <div className="rounded-xl border border-dashed border-slate-300 bg-slate-50 px-3 py-4 text-center text-[11px] text-slate-500">
-                  No photos yet. Upload, paste, or pick from chat history.
-                </div>
-              )}
-
-              {existingChatImages.length > 0 ? (
                 <div>
                   <p className="mb-1.5 text-[10px] font-semibold text-slate-600">
-                    From this customer’s chat
+                    Attached to this ticket
                   </p>
-                  <div className="flex gap-2 overflow-x-auto pb-1">
-                    {existingChatImages.map((chatImage) => {
-                      const selected = attachments.some(
-                        (attachment) =>
-                          attachment.kind === 'chat' && attachment.id === chatImage.id
-                      )
-                      return (
-                        <button
-                          key={chatImage.id}
-                          type="button"
-                          onClick={() => toggleChatImage(chatImage)}
-                          className={`relative h-20 w-20 shrink-0 overflow-hidden rounded-xl border-2 bg-slate-100 ${
-                            selected ? 'border-violet-600 ring-2 ring-violet-200' : 'border-slate-200'
-                          }`}
-                          title={`Chat image · ${new Date(chatImage.createdAt).toLocaleString()}`}
-                        >
+                  <div className="grid grid-cols-3 gap-2 sm:grid-cols-5">
+                    {attachments.map((attachment, index) => (
+                      <div
+                        key={attachment.id}
+                        className="relative aspect-square overflow-hidden rounded-xl border border-slate-200 bg-slate-50"
+                      >
+                        {attachment.kind === 'upload' ? (
+                          // eslint-disable-next-line @next/next/no-img-element
+                          <img
+                            src={attachment.previewUrl}
+                            alt={`Photo ${index + 1}`}
+                            className="h-full w-full object-cover"
+                          />
+                        ) : (
                           <ChatMessageImage
-                            imageUrl={chatImage.imageUrl}
-                            alt="Chat attachment"
+                            imageUrl={attachment.imageUrl}
+                            alt={`Photo ${index + 1}`}
                             className="h-full w-full object-cover"
                             interactive={false}
                           />
-                          {selected ? (
-                            <span className="absolute inset-x-0 bottom-0 bg-violet-600 py-0.5 text-[9px] font-bold text-white">
-                              Added
-                            </span>
-                          ) : null}
+                        )}
+                        <button
+                          type="button"
+                          onClick={() => removeAttachment(attachment.id)}
+                          className="absolute right-1 top-1 rounded-full bg-black/70 p-1 text-white hover:bg-black"
+                          aria-label={`Remove photo ${index + 1}`}
+                        >
+                          <X className="h-3.5 w-3.5" />
                         </button>
-                      )
-                    })}
+                      </div>
+                    ))}
                   </div>
                 </div>
               ) : null}

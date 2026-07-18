@@ -5717,12 +5717,9 @@ export default function DashboardPage() {
                           defaultGameUsername={selectedConvo.staffGameUsername ?? null}
                           existingChatImages={threadMessages
                             .filter(
-                              (message) =>
-                                message.sender_id === selectedConvo.customer_id &&
-                                !message.is_internal &&
-                                Boolean(message.image_url)
+                              (message) => !message.is_internal && Boolean(message.image_url)
                             )
-                            .slice(-20)
+                            .slice(-30)
                             .reverse()
                             .map((message) => ({
                               id: message.id,

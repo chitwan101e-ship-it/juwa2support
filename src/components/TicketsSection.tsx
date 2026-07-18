@@ -319,6 +319,11 @@ export function TicketsSection({
                     {ticket.game_username || `@${ticket.customer_username}`}
                   </p>
                   <p className="mt-0.5 line-clamp-2 text-[10.5px] text-slate-500">{ticket.issue}</p>
+                  {ticket.status === 'closed' && ticket.closed_at ? (
+                    <p className="mt-1 text-[9px] font-medium text-slate-400">
+                      Closed {formatTicketDate(ticket.closed_at)}
+                    </p>
+                  ) : null}
                 </button>
               ))
             )}
@@ -477,10 +482,14 @@ export function TicketsSection({
                   </span>
                   <div className="min-w-0">
                     <p className="text-[8px] font-bold uppercase tracking-[0.12em] text-sky-600">
-                      Created
+                      {selectedTicket.status === 'closed' && selectedTicket.closed_at
+                        ? 'Closed'
+                        : 'Created'}
                     </p>
                     <p className="truncate text-[11px] font-semibold text-slate-800">
-                      {formatTicketDate(selectedTicket.created_at)}
+                      {selectedTicket.status === 'closed' && selectedTicket.closed_at
+                        ? formatTicketDate(selectedTicket.closed_at)
+                        : formatTicketDate(selectedTicket.created_at)}
                     </p>
                   </div>
                 </div>
