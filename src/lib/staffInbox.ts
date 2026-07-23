@@ -182,6 +182,48 @@ export async function fetchConversationInboxLabels(
   return labelsByConvo
 }
 
+/** All conversation IDs that have any of the given label definitions. */
+export async function fetchConversationIdsForLabels(
+  client: SupabaseClient,
+  labelIds: string[]
+): Promise<string[]> {
+  if (labelIds.length === 0) return []
+  const ids = new Set<string>()
+  for (const slice of chunkIds(labelIds, INBOX_QUERY_CHUNK)) {
+    const { data, error } = await client
+      .from('conversation_inbox_labels')
+      .select('conversation_id')
+      .in('label_id', slice)
+    if (error) throw error
+    for (const row of data || []) {
+      ids.add((row as { conversation_id: string }).conversation_id)
+    }
+  }
+  return [...ids]
+}
+
+/** Load conversation rows for a business by id (chunked). */
+export async function fetchBusinessConversationsByIds(
+  client: SupabaseClient,
+  businessId: string,
+  conversationIds: string[]
+): Promise<BusinessConversationRow[]> {
+  if (conversationIds.length === 0) return []
+  const rows: BusinessConversationRow[] = []
+  for (const slice of chunkIds(conversationIds, INBOX_QUERY_CHUNK)) {
+    const { data, error } = await client
+      .from('conversations')
+      .select('id, customer_id, updated_at, staff_game_username')
+      .eq('business_id', businessId)
+      .in('id', slice)
+    if (error) throw error
+    for (const row of data || []) {
+      rows.push(row as BusinessConversationRow)
+    }
+  }
+  return rows
+}
+
 /** Chunked latest message previews per conversation. */
 export async function fetchInboxLatestPreviews(
   client: SupabaseClient,

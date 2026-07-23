@@ -206,6 +206,8 @@ textarea {
 .admin-mobile-nav-item {
   border-radius: 12px;
   transition: background 0.15s ease, color 0.15s ease;
+  -webkit-tap-highlight-color: transparent;
+  touch-action: manipulation;
 }
 
 .admin-mobile-nav-item.is-active {
@@ -216,6 +218,36 @@ textarea {
 .admin-mobile-nav-item:not(.is-active):hover {
   color: var(--admin-chrome-text);
   background: var(--admin-chrome-hover);
+}
+
+.admin-mobile-more-sheet {
+  color: var(--admin-chrome-text);
+  background:
+    radial-gradient(ellipse 120% 80% at 50% 0%, var(--admin-chrome-glow-violet), transparent 55%),
+    linear-gradient(180deg, #111827 0%, var(--admin-chrome-bg) 45%, var(--admin-chrome-bg-deep) 100%);
+  border-top: 1px solid var(--admin-chrome-border);
+  box-shadow: 0 -16px 48px -12px rgba(0, 0, 0, 0.7);
+}
+
+.admin-mobile-more-item {
+  color: var(--admin-chrome-text-muted);
+  border: 1px solid transparent;
+  background: rgba(255, 255, 255, 0.03);
+  transition: background 0.15s ease, color 0.15s ease, border-color 0.15s ease;
+  -webkit-tap-highlight-color: transparent;
+  touch-action: manipulation;
+}
+
+.admin-mobile-more-item:hover,
+.admin-mobile-more-item:active {
+  color: var(--admin-chrome-text);
+  background: var(--admin-chrome-hover);
+}
+
+.admin-mobile-more-item.is-active {
+  color: #fff;
+  border-color: rgba(167, 139, 250, 0.32);
+  background: linear-gradient(135deg, rgba(124, 58, 237, 0.18) 0%, rgba(212, 175, 55, 0.1) 100%);
 }
 
 .admin-nav-link {
@@ -653,32 +685,95 @@ textarea {
   min-height: 0;
 }
 
+@media (max-width: 1023px) {
+  .admin-shell--thread-focus {
+    height: 100dvh;
+    max-height: 100dvh;
+    min-height: 0;
+    overflow: hidden;
+  }
+
+  .admin-shell--thread-focus .admin-main-content {
+    padding: 0;
+  }
+
+  .admin-shell--thread-focus .admin-inbox-panel {
+    min-height: 0;
+    height: 100%;
+    max-height: 100%;
+    border-radius: 0;
+  }
+
+  .admin-shell--thread-focus .admin-inbox-chat {
+    height: 100%;
+    max-height: 100%;
+  }
+
+  .admin-inbox-panel {
+    min-height: min(62dvh, calc(100dvh - 11rem));
+  }
+
+  .admin-topbar .admin-breadcrumb {
+    display: none;
+  }
+}
+
 .admin-inbox-chat {
   display: grid;
-  grid-template-rows: auto 1fr auto;
+  grid-template-rows: auto minmax(0, 1fr) auto;
   min-height: 0;
   height: 100%;
+  max-height: 100%;
   overflow: hidden;
+  background: #f1f5f9;
 }
 
 .admin-inbox-chat-top {
   grid-row: 1;
   min-height: 0;
+  height: fit-content;
+  max-height: none;
+  overflow: visible;
+  background: #fff;
 }
 
 .admin-inbox-chat-messages {
   grid-row: 2;
   min-height: 0;
-  overflow-x: hidden;
-  overflow-y: auto;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+  background: #f1f5f9;
+}
+
+.admin-inbox-chat-messages-scroll {
+  flex: 1 1 auto;
+  min-height: 0;
   overscroll-behavior: contain;
   -webkit-overflow-scrolling: touch;
-  background: #f1f5f9;
+  color-scheme: light;
+  scrollbar-width: thin;
+  scrollbar-color: #cbd5e1 #f8fafc;
+}
+
+.admin-inbox-chat-messages-scroll::-webkit-scrollbar {
+  width: 8px;
+}
+
+.admin-inbox-chat-messages-scroll::-webkit-scrollbar-track {
+  background: #f8fafc;
+}
+
+.admin-inbox-chat-messages-scroll::-webkit-scrollbar-thumb {
+  background: #cbd5e1;
+  border-radius: 999px;
 }
 
 .admin-inbox-chat-composer {
   grid-row: 3;
   min-height: 0;
+  flex-shrink: 0;
+  background: #fff;
 }
 
 .admin-inbox-panel textarea,
@@ -705,32 +800,32 @@ textarea {
 
 /* Light scrollbars for inbox (Windows uses color-scheme; WebKit gets custom styling) */
 .admin-inbox-scroll,
-.admin-inbox-chat-messages {
+.admin-inbox-chat-messages-scroll {
   color-scheme: light;
   scrollbar-width: thin;
   scrollbar-color: #cbd5e1 #f8fafc;
 }
 
 .admin-inbox-scroll::-webkit-scrollbar,
-.admin-inbox-chat-messages::-webkit-scrollbar {
+.admin-inbox-chat-messages-scroll::-webkit-scrollbar {
   width: 6px;
   height: 6px;
 }
 
 .admin-inbox-scroll::-webkit-scrollbar-track,
-.admin-inbox-chat-messages::-webkit-scrollbar-track {
+.admin-inbox-chat-messages-scroll::-webkit-scrollbar-track {
   background: #f8fafc;
   border-radius: 9999px;
 }
 
 .admin-inbox-scroll::-webkit-scrollbar-thumb,
-.admin-inbox-chat-messages::-webkit-scrollbar-thumb {
+.admin-inbox-chat-messages-scroll::-webkit-scrollbar-thumb {
   background-color: #cbd5e1;
   border-radius: 9999px;
   border: 1px solid #f8fafc;
 }
 
 .admin-inbox-scroll::-webkit-scrollbar-thumb:hover,
-.admin-inbox-chat-messages::-webkit-scrollbar-thumb:hover {
+.admin-inbox-chat-messages-scroll::-webkit-scrollbar-thumb:hover {
   background-color: #94a3b8;
 }

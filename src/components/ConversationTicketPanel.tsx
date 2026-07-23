@@ -303,35 +303,38 @@ export function ConversationTicketPanel({
 
   return (
     <>
-      <div className="border-b border-slate-200 bg-slate-50/80 px-3 py-2">
+      {loading || latestTicket || canCreate ? (
+      <div className="border-b border-slate-200 bg-slate-50/80 px-2.5 sm:px-3 py-1.5 sm:py-2">
         {loading ? (
           <p className="inline-flex items-center gap-1.5 text-[10px] text-slate-500">
             <Loader2 className="h-3 w-3 animate-spin" /> Loading tickets…
           </p>
         ) : latestTicket ? (
-          <div className="flex flex-wrap items-center gap-2">
+          <div className="flex flex-nowrap items-center gap-1.5 sm:gap-2 overflow-x-auto">
             <TicketIcon className="h-4 w-4 shrink-0 text-violet-600" />
-            <span className="font-mono text-[11px] font-bold text-slate-900">
+            <span className="font-mono text-[11px] font-bold text-slate-900 shrink-0">
               {displayTicketNumber(latestTicket.ticket_number)}
             </span>
             <span
-              className={`rounded-md border px-1.5 py-0.5 text-[9px] font-bold ${statusClass(latestTicket.status)}`}
+              className={`rounded-md border px-1.5 py-0.5 text-[9px] font-bold shrink-0 ${statusClass(latestTicket.status)}`}
             >
               {supportTicketStatusLabel(latestTicket.status)}
             </span>
             <button
               type="button"
               onClick={() => void copyTicket(latestTicket)}
-              className="inline-flex items-center gap-1 rounded-lg border border-violet-200 bg-violet-50 px-2 py-1 text-[10px] font-semibold text-violet-800 hover:bg-violet-100"
+              className="inline-flex items-center gap-1 rounded-lg border border-violet-200 bg-violet-50 px-2 py-1 text-[10px] font-semibold text-violet-800 hover:bg-violet-100 shrink-0"
               title="Copy ticket details for Signal"
             >
               {copiedId === latestTicket.id ? (
                 <>
-                  <Check className="h-3 w-3" /> Copied for Signal
+                  <Check className="h-3 w-3" /> <span className="hidden sm:inline">Copied for Signal</span>
+                  <span className="sm:hidden">Copied</span>
                 </>
               ) : (
                 <>
-                  <Copy className="h-3 w-3" /> Copy for Signal
+                  <Copy className="h-3 w-3" /> <span className="hidden sm:inline">Copy for Signal</span>
+                  <span className="sm:hidden">Copy</span>
                 </>
               )}
             </button>
@@ -340,7 +343,7 @@ export function ConversationTicketPanel({
               onClick={() =>
                 void navigator.clipboard.writeText(displayTicketNumber(latestTicket.ticket_number))
               }
-              className="inline-flex items-center gap-1 rounded-lg px-1.5 py-1 text-[10px] font-semibold text-slate-500 hover:bg-slate-100 hover:text-slate-800"
+              className="hidden sm:inline-flex items-center gap-1 rounded-lg px-1.5 py-1 text-[10px] font-semibold text-slate-500 hover:bg-slate-100 hover:text-slate-800 shrink-0"
               title="Copy ticket number only"
             >
               <Clipboard className="h-3 w-3" />
@@ -353,14 +356,18 @@ export function ConversationTicketPanel({
                 className="ml-auto inline-flex shrink-0 items-center gap-1.5 rounded-lg border border-slate-200 bg-white px-2.5 py-1.5 text-[10.5px] font-semibold text-slate-700 hover:bg-slate-50"
               >
                 <TicketIcon className="h-3.5 w-3.5" />
-                New ticket
+                <span className="hidden sm:inline">New ticket</span>
+                <span className="sm:hidden">New</span>
               </button>
             ) : null}
           </div>
-        ) : canCreate ? (
+        ) : (
           <div className="flex items-center justify-between gap-2">
-            <p className="text-[10.5px] text-slate-500">
+            <p className="text-[10.5px] text-slate-500 hidden sm:block">
               Create a ticket to copy into Signal (number, username, when, issue, photos).
+            </p>
+            <p className="text-[10.5px] text-slate-500 sm:hidden truncate min-w-0">
+              Ticket for Signal
             </p>
             <button
               type="button"
@@ -371,8 +378,9 @@ export function ConversationTicketPanel({
               Create ticket
             </button>
           </div>
-        ) : null}
+        )}
       </div>
+      ) : null}
 
       {modalOpen ? (
         <div

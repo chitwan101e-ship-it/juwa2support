@@ -17,6 +17,7 @@ import {
   Camera,
   Check,
   ChevronRight,
+  ChevronDown,
   ClipboardList,
   Maximize2,
   Menu,
@@ -99,6 +100,8 @@ import {
 import { isChatComposerSubmitKey } from '@/lib/chatComposerKeyboard'
 import {
   fetchAllBusinessConversations,
+  fetchBusinessConversationsByIds,
+  fetchConversationIdsForLabels,
   fetchConversationInboxLabels,
   fetchInboxLabelDefinitions,
   fetchInboxLatestPreviews,
@@ -452,6 +455,10 @@ function threadMatchesInboxTab(
 
 function sortInboxLabels(labels: InboxLabelRow[]): InboxLabelRow[] {
   return [...labels].sort((a, b) => {
+    // Keep Unread first so it isn't buried under "+N" when many labels are present.
+    const aUnread = a.preset_key === INBOX_LABEL_UNREAD ? 0 : 1
+    const bUnread = b.preset_key === INBOX_LABEL_UNREAD ? 0 : 1
+    if (aUnread !== bUnread) return aUnread - bUnread
     if (a.is_system !== b.is_system) return a.is_system ? -1 : 1
     return a.name.localeCompare(b.name)
   })
@@ -461,7 +468,10 @@ function displayLabelsForConvo(item: ConvoListItem, unreadDef: InboxLabelRow): I
   const withoutStaleUnread = item.labels.filter(
     (l) => l.preset_key !== INBOX_LABEL_UNREAD || item.unreadCount > 0
   )
-  if (item.unreadCount > 0 && !withoutStaleUnread.some((l) => l.preset_key === INBOX_LABEL_UNREAD)) {
+  const hasUnreadChip = withoutStaleUnread.some(
+    (l) => l.preset_key === INBOX_LABEL_UNREAD || l.id === unreadDef.id
+  )
+  if (item.unreadCount > 0 && !hasUnreadChip) {
     return sortInboxLabels([...withoutStaleUnread, unreadDef])
   }
   return sortInboxLabels(withoutStaleUnread)
@@ -521,6 +531,17 @@ const NAV_DEF: {
   { id: 'team', label: 'Team', adminOnly: true, icon: UserCog },
 ]
 
+/** Prefer these in the mobile bottom bar; remaining items go under "More". */
+const MOBILE_PRIMARY_ORDER: AppTab[] = [
+  'home',
+  'inbox-website',
+  'inbox-app',
+  'tickets',
+  'users',
+  'inbox-technical',
+]
+const MOBILE_PRIMARY_MAX = 4
+
 function timeAgo(iso: string) {
   const sec = Math.floor((Date.now() - new Date(iso).getTime()) / 1000)
   if (sec < 60) return 'just now'
@@ -573,6 +594,7 @@ export default function DashboardPage() {
   const [mountedTabs, setMountedTabs] = useState<ReadonlySet<AppTab>>(() => new Set(['home']))
   const [sidebarCollapsed, setSidebarCollapsed] = useState(false)
   const [expandedInboxNavIds, setExpandedInboxNavIds] = useState<AppTab[]>([])
+  const [mobileMoreOpen, setMobileMoreOpen] = useState(false)
   /** Label filter to apply after an inbox tab switch triggered from the sidebar dropdown. */
   const pendingInboxLabelFilterRef = useRef<string[] | null>(null)
 
@@ -721,6 +743,7 @@ export default function DashboardPage() {
   const [usersLoading, setUsersLoading] = useState(false)
   const [usersRefreshing, setUsersRefreshing] = useState(false)
   const [inboxContactOpen, setInboxContactOpen] = useState(false)
+  const [showScrollToLatest, setShowScrollToLatest] = useState(false)
   const [staffNotifyUnread, setStaffNotifyUnread] = useState(0)
   const [inboxRefreshing, setInboxRefreshing] = useState(false)
   const [inboxLabelCatalog, setInboxLabelCatalog] = useState<InboxLabelRow[]>([])
@@ -733,6 +756,16 @@ export default function DashboardPage() {
   const [inboxLabelCreateBusy, setInboxLabelCreateBusy] = useState(false)
   const [inboxSearchQuery, setInboxSearchQuery] = useState('')
   const [inboxSearchExtraConvos, setInboxSearchExtraConvos] = useState<ConvoListItem[]>([])
+  const [inboxLabelExtraConvos, setInboxLabelExtraConvos] = useState<ConvoListItem[]>([])
+  const [inboxLabelExtraBusy, setInboxLabelExtraBusy] = useState(false)
+  /** Session cache of label-fetched threads so Unread can reuse Giveaway (etc.) rows with unreadCount. */
+  const inboxLabelExtrasCacheRef = useRef<Map<string, ConvoListItem>>(new Map())
+  /** Full unread-thread counts for nav badges (not limited to the recent inbox page). */
+  const [inboxNavUnreadBadges, setInboxNavUnreadBadges] = useState({
+    website: 0,
+    app: 0,
+    technical: 0,
+  })
   const [inboxSearchExtraBusy, setInboxSearchExtraBusy] = useState(false)
   const [cannedReplies, setCannedReplies] = useState<CannedReplyRow[]>([])
   const [cannedPopoverOpen, setCannedPopoverOpen] = useState(false)
@@ -807,6 +840,17 @@ export default function DashboardPage() {
     const el = threadScrollRef.current
     if (!el) return
     el.scrollTo({ top: el.scrollHeight, behavior })
+    setShowScrollToLatest(false)
+  }, [])
+
+  const updateScrollToLatestVisibility = useCallback(() => {
+    const el = threadScrollRef.current
+    if (!el) {
+      setShowScrollToLatest(false)
+      return
+    }
+    const distanceFromBottom = el.scrollHeight - el.scrollTop - el.clientHeight
+    setShowScrollToLatest(distanceFromBottom > 120)
   }, [])
 
   const navItems = useMemo(() => {
@@ -1278,6 +1322,7 @@ export default function DashboardPage() {
 
   const switchTab = useCallback((tab: AppTab) => {
     setActiveTab(tab)
+    setMobileMoreOpen(false)
     setMountedTabs((prev) => {
       if (prev.has(tab)) return prev
       return new Set(prev).add(tab)
@@ -1889,6 +1934,26 @@ export default function DashboardPage() {
     const raf = window.requestAnimationFrame(() => scrollThreadToLatest('auto'))
     return () => window.cancelAnimationFrame(raf)
   }, [selectedConvoId, threadLoading, threadMessages.length, scrollThreadToLatest])
+
+  useEffect(() => {
+    setShowScrollToLatest(false)
+  }, [selectedConvoId])
+
+  useEffect(() => {
+    const el = threadScrollRef.current
+    if (!el || !selectedConvoId) return
+    updateScrollToLatestVisibility()
+    el.addEventListener('scroll', updateScrollToLatestVisibility, { passive: true })
+    const ro =
+      typeof ResizeObserver !== 'undefined'
+        ? new ResizeObserver(() => updateScrollToLatestVisibility())
+        : null
+    ro?.observe(el)
+    return () => {
+      el.removeEventListener('scroll', updateScrollToLatestVisibility)
+      ro?.disconnect()
+    }
+  }, [selectedConvoId, threadLoading, threadMessages.length, updateScrollToLatestVisibility])
 
   useEffect(() => {
     const p = profileRef.current
@@ -2533,6 +2598,258 @@ export default function DashboardPage() {
 
     return () => window.clearTimeout(timer)
   }, [activeTab, inboxSearchQuery, profile?.business_id, convoList, activeMembers, suspendedMembers, supabase])
+
+  /**
+   * Inbox cold-load is capped (recent N threads). When a real label filter is selected,
+   * load every conversation with that label so older labeled users still appear.
+   * Includes the Unread preset label (auto-managed in DB) — previously excluded, which
+   * made Unread only show threads already in the recent list.
+   */
+  useEffect(() => {
+    if (!isInboxTab(activeTab)) {
+      setInboxLabelExtraConvos([])
+      setInboxLabelExtraBusy(false)
+      return
+    }
+    const bid = profile?.business_id
+    const catalog = inboxLabelCatalogRef.current ?? []
+    const unreadCatalogId = catalog.find((l) => l.preset_key === INBOX_LABEL_UNREAD)?.id ?? null
+
+    const realLabelIds: string[] = []
+    let filteringUnread = false
+    for (const id of inboxThreadLabelFilterIds) {
+      if (id === INBOX_READ_FILTER_ID) continue
+      if (id === 'preset-unread') {
+        filteringUnread = true
+        if (unreadCatalogId) realLabelIds.push(unreadCatalogId)
+        continue
+      }
+      if (unreadCatalogId && id === unreadCatalogId) filteringUnread = true
+      else if (catalog.find((l) => l.id === id)?.preset_key === INBOX_LABEL_UNREAD) {
+        filteringUnread = true
+      }
+      realLabelIds.push(id)
+    }
+    const uniqueLabelIds = [...new Set(realLabelIds)]
+
+    if (!bid || (uniqueLabelIds.length === 0 && !filteringUnread)) {
+      setInboxLabelExtraConvos([])
+      setInboxLabelExtraBusy(false)
+      return
+    }
+
+    let cancelled = false
+    setInboxLabelExtraBusy(true)
+    void (async () => {
+      try {
+        const labeledIds =
+          uniqueLabelIds.length > 0
+            ? await fetchConversationIdsForLabels(supabase, uniqueLabelIds)
+            : []
+        if (cancelled) return
+
+        // Reuse threads already fetched under another label (e.g. Giveaway) that are unread,
+        // even if the DB unread label assignment is missing/out of sync.
+        const cachedUnreadIds = filteringUnread
+          ? [...inboxLabelExtrasCacheRef.current.values()]
+              .filter(
+                (c) =>
+                  c.unreadCount > 0 ||
+                  c.labels.some(
+                    (l) => l.preset_key === INBOX_LABEL_UNREAD || l.id === unreadCatalogId
+                  )
+              )
+              .map((c) => c.id)
+          : []
+
+        const candidateIds = [...new Set([...labeledIds, ...cachedUnreadIds])]
+        const loadedIds = new Set(convoListRef.current.map((c) => c.id))
+        const missingIds = candidateIds.filter((id) => !loadedIds.has(id))
+
+        // Prefer fresh rows for missing IDs; keep cached copies for unread reuse when fetch not needed.
+        const cachedHits: ConvoListItem[] = []
+        const needFetchIds: string[] = []
+        for (const id of missingIds) {
+          const cached = inboxLabelExtrasCacheRef.current.get(id)
+          if (filteringUnread && cached) {
+            cachedHits.push(cached)
+          } else {
+            needFetchIds.push(id)
+          }
+        }
+
+        if (needFetchIds.length === 0) {
+          if (!cancelled) {
+            setInboxLabelExtraConvos(cachedHits)
+            setInboxLabelExtraBusy(false)
+          }
+          return
+        }
+
+        const convoRows = await fetchBusinessConversationsByIds(supabase, bid, needFetchIds)
+        if (cancelled) return
+        if (convoRows.length === 0) {
+          setInboxLabelExtraConvos(cachedHits)
+          setInboxLabelExtraBusy(false)
+          return
+        }
+
+        const convIds = convoRows.map((r) => r.id)
+        const customerIds = [...new Set(convoRows.map((r) => r.customer_id))]
+        const defById = Object.fromEntries(catalog.map((d) => [d.id, d])) as Record<
+          string,
+          InboxLabelRow
+        >
+
+        type ProfileChunk = {
+          id: string
+          first_name: string
+          last_name: string
+          username: string
+          avatar_url?: string | null
+          signup_source?: string | null
+          game_user_id?: string | null
+        }
+        const profileById: Record<string, ProfileChunk> = {}
+        for (let i = 0; i < customerIds.length; i += PROFILE_ID_IN_CHUNK) {
+          const slice = customerIds.slice(i, i + PROFILE_ID_IN_CHUNK)
+          const { data: profs } = await supabase
+            .from('profiles')
+            .select('id, first_name, last_name, username, avatar_url, signup_source, game_user_id')
+            .in('id', slice)
+          for (const row of profs || []) {
+            const r = row as ProfileChunk
+            profileById[r.id] = r
+          }
+        }
+
+        const [previewByConvo, unreadByConvo, labelsByConvo] = await Promise.all([
+          fetchInboxLatestPreviews(supabase, convIds),
+          fetchInboxUnreadCounts(supabase, convoRows),
+          catalog.length > 0
+            ? fetchConversationInboxLabels(supabase, convIds, defById)
+            : Promise.resolve({} as Record<string, InboxLabelRow[]>),
+        ])
+        if (cancelled) return
+
+        const fetched: ConvoListItem[] = convoRows.map((row) => {
+          const pr = profileById[row.customer_id]
+          const name = pr
+            ? `${pr.first_name ?? ''} ${pr.last_name ?? ''}`.trim() || pr.username || 'Customer'
+            : 'Customer'
+          const preview = (previewByConvo[row.id]?.body ?? '').trim() || 'No messages yet'
+          const inferredChannel: 'website' | 'app' =
+            pr?.signup_source === 'juwa_app' || pr?.game_user_id ? 'app' : 'website'
+          return {
+            id: row.id,
+            customer_id: row.customer_id,
+            customerName: name,
+            customerUsername: pr?.username ?? '—',
+            customerAvatar: pr?.avatar_url ?? null,
+            staffGameUsername: row.staff_game_username?.trim() || null,
+            preview,
+            updated_at: row.updated_at,
+            unreadCount: unreadByConvo[row.id] ?? 0,
+            labels: labelsByConvo[row.id] ?? [],
+            inferredChannel,
+          }
+        })
+
+        for (const item of fetched) {
+          inboxLabelExtrasCacheRef.current.set(item.id, item)
+        }
+
+        const byId = new Map<string, ConvoListItem>()
+        for (const item of cachedHits) byId.set(item.id, item)
+        for (const item of fetched) byId.set(item.id, item)
+        setInboxLabelExtraConvos([...byId.values()])
+      } catch (e) {
+        console.error('[inbox] label filter load:', e)
+        if (!cancelled) setInboxLabelExtraConvos([])
+      } finally {
+        if (!cancelled) setInboxLabelExtraBusy(false)
+      }
+    })()
+
+    return () => {
+      cancelled = true
+    }
+  }, [activeTab, inboxThreadLabelFilterIds, profile?.business_id, supabase, convoList.length])
+
+  /** Keep sidebar Website / App / Technical badges in sync with all Unread-labeled threads (not just recent page). */
+  useEffect(() => {
+    const bid = profile?.business_id
+    if (!bid) {
+      setInboxNavUnreadBadges({ website: 0, app: 0, technical: 0 })
+      return
+    }
+    let cancelled = false
+    const timer = window.setTimeout(() => {
+      void (async () => {
+        try {
+          const catalog =
+            inboxLabelCatalogRef.current.length > 0
+              ? inboxLabelCatalogRef.current
+              : await fetchInboxLabelDefinitions(supabase, bid)
+          if (cancelled) return
+          if (catalog.length > 0) inboxLabelCatalogRef.current = catalog
+
+          const unreadId = catalog.find((l) => l.preset_key === INBOX_LABEL_UNREAD)?.id
+          if (!unreadId) {
+            setInboxNavUnreadBadges({ website: 0, app: 0, technical: 0 })
+            return
+          }
+
+          const labeledIds = await fetchConversationIdsForLabels(supabase, [unreadId])
+          if (cancelled) return
+          if (labeledIds.length === 0) {
+            setInboxNavUnreadBadges({ website: 0, app: 0, technical: 0 })
+            return
+          }
+
+          const defById = Object.fromEntries(catalog.map((d) => [d.id, d])) as Record<
+            string,
+            InboxLabelRow
+          >
+          const labelsByConvo = await fetchConversationInboxLabels(supabase, labeledIds, defById)
+          if (cancelled) return
+
+          let website = 0
+          let app = 0
+          let technical = 0
+          for (const id of labeledIds) {
+            const labels = labelsByConvo[id] ?? []
+            const inferredChannel: 'website' | 'app' = labels.some(
+              (l) => l.preset_key === INBOX_LABEL_JUWA_APP
+            )
+              ? 'app'
+              : 'website'
+            const item: ConvoListItem = {
+              id,
+              customer_id: '',
+              customerName: '',
+              customerUsername: '',
+              preview: '',
+              updated_at: '',
+              unreadCount: 1,
+              labels,
+              inferredChannel,
+            }
+            if (threadMatchesInboxTab(item, 'inbox-website', escalationByConvoId)) website += 1
+            if (threadMatchesInboxTab(item, 'inbox-app', escalationByConvoId)) app += 1
+            if (threadMatchesInboxTab(item, 'inbox-technical', escalationByConvoId)) technical += 1
+          }
+          if (!cancelled) setInboxNavUnreadBadges({ website, app, technical })
+        } catch (e) {
+          console.error('[inbox] nav unread badges:', e)
+        }
+      })()
+    }, 400)
+    return () => {
+      cancelled = true
+      window.clearTimeout(timer)
+    }
+  }, [profile?.business_id, supabase, convoList.length, inboxLabelCatalog.length, escalationByConvoId])
 
   async function manualRefresh() {
     const p = profileRef.current
@@ -3920,36 +4237,6 @@ export default function DashboardPage() {
   const needsUsersLists = activeTab === 'users'
   const needsNotifyLists = activeTab === 'notify'
 
-  const inboxWebsiteUnreadTotal = useMemo(
-    () => countInboxThreadsWithUnread(convoList, 'inbox-website', escalationByConvoId),
-    [convoList, escalationByConvoId]
-  )
-
-  const inboxAppUnreadTotal = useMemo(
-    () => countInboxThreadsWithUnread(convoList, 'inbox-app', escalationByConvoId),
-    [convoList, escalationByConvoId]
-  )
-
-  const inboxTechnicalUnreadTotal = useMemo(
-    () => countInboxThreadsWithUnread(convoList, 'inbox-technical', escalationByConvoId),
-    [convoList, escalationByConvoId]
-  )
-
-  const inboxWebsiteUnreadMessageTotal = useMemo(
-    () => countInboxUnreadMessages(convoList, 'inbox-website', escalationByConvoId),
-    [convoList, escalationByConvoId]
-  )
-
-  const inboxAppUnreadMessageTotal = useMemo(
-    () => countInboxUnreadMessages(convoList, 'inbox-app', escalationByConvoId),
-    [convoList, escalationByConvoId]
-  )
-
-  const inboxTechnicalUnreadMessageTotal = useMemo(
-    () => countInboxUnreadMessages(convoList, 'inbox-technical', escalationByConvoId),
-    [convoList, escalationByConvoId]
-  )
-
   const unreadLabelDef = useMemo<InboxLabelRow>(
     () =>
       inboxLabelCatalog.find((l) => l.preset_key === INBOX_LABEL_UNREAD) ?? {
@@ -3976,8 +4263,44 @@ export default function DashboardPage() {
     for (const c of inboxSearchExtraConvos) {
       if (!byId.has(c.id)) byId.set(c.id, c)
     }
+    for (const c of inboxLabelExtraConvos) {
+      if (!byId.has(c.id)) byId.set(c.id, c)
+    }
     return [...byId.values()].sort((a, b) => b.updated_at.localeCompare(a.updated_at))
-  }, [convoList, inboxSearchExtraConvos, needsInboxLists])
+  }, [convoList, inboxSearchExtraConvos, inboxLabelExtraConvos, needsInboxLists])
+
+  const localWebsiteUnread = useMemo(
+    () => countInboxThreadsWithUnread(convoListMerged, 'inbox-website', escalationByConvoId),
+    [convoListMerged, escalationByConvoId]
+  )
+  const localAppUnread = useMemo(
+    () => countInboxThreadsWithUnread(convoListMerged, 'inbox-app', escalationByConvoId),
+    [convoListMerged, escalationByConvoId]
+  )
+  const localTechnicalUnread = useMemo(
+    () => countInboxThreadsWithUnread(convoListMerged, 'inbox-technical', escalationByConvoId),
+    [convoListMerged, escalationByConvoId]
+  )
+
+  /** Sidebar badges: prefer full DB unread totals; never show less than what is already loaded locally. */
+  const inboxWebsiteUnreadTotal = Math.max(inboxNavUnreadBadges.website, localWebsiteUnread)
+  const inboxAppUnreadTotal = Math.max(inboxNavUnreadBadges.app, localAppUnread)
+  const inboxTechnicalUnreadTotal = Math.max(inboxNavUnreadBadges.technical, localTechnicalUnread)
+
+  const inboxWebsiteUnreadMessageTotal = useMemo(
+    () => countInboxUnreadMessages(convoListMerged, 'inbox-website', escalationByConvoId),
+    [convoListMerged, escalationByConvoId]
+  )
+
+  const inboxAppUnreadMessageTotal = useMemo(
+    () => countInboxUnreadMessages(convoListMerged, 'inbox-app', escalationByConvoId),
+    [convoListMerged, escalationByConvoId]
+  )
+
+  const inboxTechnicalUnreadMessageTotal = useMemo(
+    () => countInboxUnreadMessages(convoListMerged, 'inbox-technical', escalationByConvoId),
+    [convoListMerged, escalationByConvoId]
+  )
 
   /** Merge active-member profile data when inbox thread rows lack names (RLS gaps). */
   const convoListForInbox = useMemo(() => {
@@ -4266,15 +4589,35 @@ export default function DashboardPage() {
   }
 
   const isAdmin = profile.business_role === 'admin'
+  const mobilePrimaryNav = (() => {
+    const byId = new Map(navItems.map((item) => [item.id, item]))
+    const preferred = MOBILE_PRIMARY_ORDER.map((id) => byId.get(id)).filter(
+      (item): item is (typeof navItems)[number] => Boolean(item)
+    )
+    const primary =
+      preferred.length > 0
+        ? preferred.slice(0, MOBILE_PRIMARY_MAX)
+        : navItems.slice(0, MOBILE_PRIMARY_MAX)
+    const primaryIds = new Set(primary.map((item) => item.id))
+    const more = navItems.filter((item) => !primaryIds.has(item.id))
+    return { primary, more }
+  })()
+  const mobileNavSlotCount =
+    mobilePrimaryNav.primary.length + (mobilePrimaryNav.more.length > 0 ? 1 : 0)
   const mobileGridClass =
-    navItems.length > 7
-      ? 'grid-cols-8'
-      : navItems.length > 6
-        ? 'grid-cols-7'
-        : navItems.length > 5
-          ? 'grid-cols-6'
-          : 'grid-cols-5'
+    mobileNavSlotCount >= 5
+      ? 'grid-cols-5'
+      : mobileNavSlotCount === 4
+        ? 'grid-cols-4'
+        : mobileNavSlotCount === 3
+          ? 'grid-cols-3'
+          : mobileNavSlotCount === 2
+            ? 'grid-cols-2'
+            : 'grid-cols-1'
   const selectedConvo = convoListForInbox.find((c) => c.id === selectedConvoId) || null
+  const mobileInboxFocus = isInboxTab(activeTab) && Boolean(selectedConvoId)
+  const moreTabActive =
+    mobileMoreOpen || mobilePrimaryNav.more.some((item) => item.id === activeTab)
   const activeNav = navItems.find((n) => n.id === activeTab)
   const headerTitle = isInboxTab(activeTab)
     ? inboxChannelTitle(activeTab)
@@ -4295,7 +4638,7 @@ export default function DashboardPage() {
     selectedEscalation && isActiveEscalation(selectedEscalation.status)
 
   return (
-    <div className={`admin-shell min-h-screen lg:h-screen lg:overflow-hidden text-[14px] leading-snug antialiased lg:grid ${sidebarCollapsed ? 'lg:grid-cols-[68px_1fr]' : 'lg:grid-cols-[236px_1fr]'}`}>
+    <div className={`admin-shell min-h-screen lg:h-screen lg:overflow-hidden text-[14px] leading-snug antialiased lg:grid ${sidebarCollapsed ? 'lg:grid-cols-[68px_1fr]' : 'lg:grid-cols-[236px_1fr]'} ${mobileInboxFocus ? 'admin-shell--thread-focus max-lg:h-[100dvh] max-lg:max-h-[100dvh] max-lg:overflow-hidden max-lg:min-h-0' : ''}`}>
       <aside className="admin-sidebar hidden lg:flex lg:h-full lg:min-h-0 flex-col overflow-hidden">
         <div className={`admin-sidebar-profile flex items-center gap-2.5 h-14 shrink-0 ${sidebarCollapsed ? 'justify-center px-2' : 'px-3'}`}>
           <div className="relative shrink-0">
@@ -4496,8 +4839,18 @@ export default function DashboardPage() {
         </div>
       </aside>
 
-      <main className="flex flex-col min-h-0 w-full min-h-screen lg:min-h-0 lg:h-full overflow-hidden pb-[max(4.25rem,env(safe-area-inset-bottom))] lg:pb-0">
-        <header className="admin-topbar shrink-0 flex items-center gap-2 h-14 px-3 sm:px-4">
+      <main
+        className={`flex flex-col min-h-0 w-full overflow-hidden lg:pb-0 ${
+          mobileInboxFocus
+            ? 'h-[100dvh] max-h-[100dvh] min-h-0 pb-0'
+            : 'min-h-screen lg:min-h-0 lg:h-full pb-[max(4.25rem,env(safe-area-inset-bottom))]'
+        }`}
+      >
+        <header
+          className={`admin-topbar shrink-0 flex items-center gap-2 h-14 px-3 sm:px-4 ${
+            mobileInboxFocus ? 'max-lg:hidden' : ''
+          }`}
+        >
           <button
             type="button"
             onClick={() => setSidebarCollapsed((v) => !v)}
@@ -4570,12 +4923,14 @@ export default function DashboardPage() {
         >
           <div
             className={
-              isFullHeightStaffPanel(activeTab)
-                ? 'mx-auto w-full max-w-7xl flex-1 min-h-0 min-w-0 overflow-hidden flex flex-col gap-2 px-3 py-2 sm:px-4 sm:py-3'
-                : 'mx-auto w-full max-w-7xl space-y-3 px-3 py-3 sm:px-4 sm:py-4'
+              mobileInboxFocus
+                ? 'mx-auto w-full max-w-7xl flex-1 min-h-0 min-w-0 overflow-hidden flex flex-col gap-0 p-0'
+                : isFullHeightStaffPanel(activeTab)
+                  ? 'mx-auto w-full max-w-7xl flex-1 min-h-0 min-w-0 overflow-hidden flex flex-col gap-2 px-3 py-2 sm:px-4 sm:py-3'
+                  : 'mx-auto w-full max-w-7xl space-y-3 px-3 py-3 sm:px-4 sm:py-4'
             }
           >
-          {loadError ? (
+          {loadError && !mobileInboxFocus ? (
             <div className="rounded-xl border border-red-200 bg-red-50 px-3 py-2 text-[13px] text-red-700">
               <strong className="font-semibold">Data load issue:</strong> {loadError}
               {/\b(column|relation|does not exist|42703|42P01|suspended|moderation_suspension)\b/i.test(loadError) ? (
@@ -4593,7 +4948,7 @@ export default function DashboardPage() {
             </div>
           ) : null}
 
-          {!businessInfo && profile.business_id ? (
+          {!businessInfo && profile.business_id && !mobileInboxFocus ? (
             <div className="rounded-xl border border-amber-200 bg-amber-50 px-3 py-2 text-[13px] text-amber-800">
               Could not load business record — check the businesses table for this business_id.
             </div>
@@ -5184,22 +5539,28 @@ export default function DashboardPage() {
           activeTab={activeTab}
           mountedTabs={mountedTabs}
           isVisible={(tab) => isInboxTab(tab as AppTab)}
-          className="flex flex-col flex-1 min-h-0 min-w-0 overflow-hidden gap-2"
+          className={`flex flex-col flex-1 min-h-0 min-w-0 overflow-hidden ${
+            mobileInboxFocus ? 'gap-0' : 'gap-2'
+          }`}
           render={() => (
           <>
-            <DesktopNotificationPrompt variant="staff" isLight />
-            {!isAdmin && profile.business_role === 'support' && staffInboxScope ? (
+            {!mobileInboxFocus ? <DesktopNotificationPrompt variant="staff" isLight /> : null}
+            {!isAdmin && profile.business_role === 'support' && staffInboxScope && !mobileInboxFocus ? (
               <p className="text-[11px] text-slate-500 shrink-0 rounded-xl border border-slate-200 bg-slate-50 px-3 py-2">
                 Your assignment: <strong className="text-slate-600">{supportScopeLabel(staffInboxScope)}</strong>. You only see
                 customer threads in your assigned inbox{staffInboxScope === 'both' ? 'es' : ''}.
               </p>
             ) : null}
-            {profile.business_role === 'technical' ? (
+            {profile.business_role === 'technical' && !mobileInboxFocus ? (
               <p className="text-[11px] text-slate-700 shrink-0 rounded-xl border border-orange-200 bg-orange-50 px-3 py-2">
                 Escalated threads from support appear here with full chat history. <strong className="text-orange-800">Claim</strong> a thread to take over the same customer chat.
               </p>
             ) : null}
-            <div className="flex items-center justify-between gap-2 flex-wrap shrink-0">
+            <div
+              className={`flex items-center justify-between gap-2 flex-wrap shrink-0 ${
+                mobileInboxFocus ? 'max-lg:hidden' : ''
+              }`}
+            >
               <div className="flex items-center gap-2 min-h-[34px]">
                 <h3 className="text-base font-bold tracking-tight text-slate-900">{inboxChannelTitle(activeTab)}</h3>
                 {(activeTab === 'inbox-website'
@@ -5230,7 +5591,8 @@ export default function DashboardPage() {
                   className="inline-flex items-center gap-2 rounded-[10px] border border-slate-200 bg-slate-50 px-3 py-2 text-[13px] font-semibold text-slate-600 hover:text-slate-900 hover:bg-slate-100 disabled:opacity-40"
                 >
                   <RefreshCw className={`w-4 h-4 ${inboxRefreshing ? 'animate-spin' : ''}`} />
-                  Refresh inbox
+                  <span className="sm:hidden">Refresh</span>
+                  <span className="hidden sm:inline">Refresh inbox</span>
                 </button>
               </div>
             </div>
@@ -5272,8 +5634,18 @@ export default function DashboardPage() {
                 </div>
               )
             ) : (
-              <div className="admin-inbox-panel rounded-2xl border border-slate-200 bg-white shadow-sm overflow-hidden flex flex-col flex-1 min-h-0 lg:grid lg:grid-cols-[minmax(220px,1fr)_minmax(0,1.75fr)] lg:h-full">
-                <aside className="border-r border-slate-200 flex flex-col min-h-0 overflow-hidden max-h-[38vh] lg:max-h-none lg:h-full">
+              <div
+                className={`admin-inbox-panel overflow-hidden flex flex-col flex-1 min-h-0 lg:grid lg:grid-cols-[minmax(220px,1fr)_minmax(0,1.75fr)] lg:h-full ${
+                  mobileInboxFocus
+                    ? 'rounded-none border-0 shadow-none bg-white'
+                    : 'rounded-2xl border border-slate-200 bg-white shadow-sm'
+                }`}
+              >
+                <aside
+                  className={`border-r border-slate-200 flex-col min-h-0 overflow-hidden flex-1 lg:flex-none lg:max-h-none lg:h-full ${
+                    selectedConvoId ? 'hidden lg:flex' : 'flex'
+                  }`}
+                >
                   <div className="p-2.5 border-b border-slate-200 shrink-0">
                     <div className="relative rounded-xl border border-slate-200 bg-slate-50">
                       <Search className="pointer-events-none absolute left-2.5 top-1/2 h-4 w-4 -translate-y-1/2 text-slate-400" aria-hidden />
@@ -5344,9 +5716,11 @@ export default function DashboardPage() {
                   <div className="admin-inbox-scroll flex-1 min-h-0 overflow-y-auto overscroll-y-contain divide-y divide-slate-200">
                     {inboxThreadLabelFilterIds.length > 0 ? (
                       <p className="px-3 py-2 text-[11px] text-slate-600 border-b border-slate-200">
-                        {inboxDisplayList.length === 0
-                          ? 'No labeled threads in this channel.'
-                          : `${inboxDisplayList.length} thread${inboxDisplayList.length === 1 ? '' : 's'} with this label.`}{' '}
+                        {inboxLabelExtraBusy
+                          ? 'Loading all threads with this label…'
+                          : inboxDisplayList.length === 0
+                            ? 'No labeled threads in this channel.'
+                            : `${inboxDisplayList.length} thread${inboxDisplayList.length === 1 ? '' : 's'} with this label.`}{' '}
                         <button
                           type="button"
                           onClick={() => setInboxThreadLabelFilterIds([])}
@@ -5461,13 +5835,30 @@ export default function DashboardPage() {
                   </div>
                 </aside>
 
-                <div className="admin-inbox-chat relative min-h-0 h-full overflow-hidden">
+                <div
+                  className={`admin-inbox-chat relative min-h-0 overflow-hidden flex-1 lg:flex-none ${
+                    selectedConvoId ? 'h-full max-h-full' : 'max-lg:hidden h-full'
+                  }`}
+                >
                   {selectedConvo ? (
                     <>
-                      <div className="admin-inbox-chat-top">
-                      <div className="px-3 py-2 border-b border-slate-200 shrink-0 space-y-1.5">
-                        <div className="flex items-center gap-2 justify-between">
-                          <div className="flex items-center gap-2.5 min-w-0">
+                      <div className="admin-inbox-chat-top shrink-0">
+                      <div className="px-2 sm:px-3 py-1.5 sm:py-2 border-b border-slate-200 shrink-0 space-y-1">
+                        <div className="flex items-center gap-1.5 sm:gap-2 justify-between">
+                          <div className="flex items-center gap-1.5 sm:gap-2.5 min-w-0">
+                            <button
+                              type="button"
+                              onClick={() => {
+                                setSelectedConvoId(null)
+                                setThreadMessages([])
+                                setInboxContactOpen(false)
+                                setInboxLabelsPopoverOpen(false)
+                              }}
+                              className="lg:hidden inline-flex h-9 w-9 shrink-0 items-center justify-center rounded-lg border border-slate-200 bg-slate-50 text-slate-700 hover:bg-slate-100"
+                              aria-label="Back to thread list"
+                            >
+                              <ArrowLeft className="w-4 h-4" />
+                            </button>
                             <div className="w-8 h-8 rounded-full bg-[#d12f2f] overflow-hidden flex items-center justify-center text-[11px] font-bold text-slate-900 shrink-0">
                               {selectedConvo.customerAvatar ? (
                                 <img src={selectedConvo.customerAvatar} alt={`${selectedConvo.customerName} avatar`} className="w-full h-full object-cover" />
@@ -5479,21 +5870,21 @@ export default function DashboardPage() {
                               <p className="text-[13px] font-semibold text-slate-900 truncate">
                                 {selectedConvo.customerName}
                                 {selectedConvo.staffGameUsername ? (
-                                  <span className="font-normal text-violet-500">
+                                  <span className="font-normal text-violet-500 hidden sm:inline">
                                     {' '}
                                     · {selectedConvo.staffGameUsername}
                                   </span>
                                 ) : null}
                               </p>
-                              <p className="text-[11px] text-slate-600 truncate">@{selectedConvo.customerUsername} · Customer</p>
+                              <p className="text-[11px] text-slate-600 truncate">@{selectedConvo.customerUsername}</p>
                             </div>
                           </div>
-                          <div className="flex items-center gap-0.5 shrink-0 relative">
+                          <div className="flex items-center gap-0.5 shrink-0 relative max-w-[52%] sm:max-w-none overflow-x-auto">
                             {conversationHasUnreadState(selectedConvo) ? (
                               <button
                                 type="button"
                                 onClick={() => void markSelectedThreadReadWithoutReply()}
-                                className="inline-flex items-center gap-1 px-2 py-1.5 rounded-lg border border-slate-200 bg-slate-50 text-[11px] font-semibold text-slate-700 hover:bg-slate-100"
+                                className="inline-flex items-center gap-1 px-2 py-1.5 rounded-lg border border-slate-200 bg-slate-50 text-[11px] font-semibold text-slate-700 hover:bg-slate-100 whitespace-nowrap"
                                 title="Clear unread without sending a reply (e.g. handled by phone)"
                               >
                                 Mark read
@@ -5505,7 +5896,7 @@ export default function DashboardPage() {
                                 type="button"
                                 disabled={escalateBusy}
                                 onClick={() => void escalateSelectedThread()}
-                                className="inline-flex items-center gap-1 px-2 py-1.5 rounded-lg border border-orange-300 bg-orange-50 text-[11px] font-semibold text-orange-900 hover:bg-orange-100 disabled:opacity-40"
+                                className="inline-flex items-center gap-1 px-2 py-1.5 rounded-lg border border-orange-300 bg-orange-50 text-[11px] font-semibold text-orange-900 hover:bg-orange-100 disabled:opacity-40 whitespace-nowrap"
                                 title="Forward to Technical Support"
                               >
                                 {escalateBusy ? (
@@ -5513,7 +5904,7 @@ export default function DashboardPage() {
                                 ) : (
                                   <ArrowUpRight className="w-4 h-4" />
                                 )}
-                                Escalate
+                                <span className="hidden sm:inline">Escalate</span>
                               </button>
                             ) : null}
                             <button
@@ -5638,14 +6029,14 @@ export default function DashboardPage() {
                             {(() => {
                               const displaySelectedLabels = displayLabelsForConvo(selectedConvo, unreadLabelDef)
                               return displaySelectedLabels.length > 0 ? (
-                          <div className="flex flex-wrap gap-1.5 items-center pl-[42px]">
+                          <div className="flex flex-nowrap gap-1.5 items-center overflow-x-auto pl-0 sm:pl-[42px] pb-0.5 -mx-0.5 px-0.5">
                             {displaySelectedLabels.map((l) => {
                               const autoManaged = isAutoManagedInboxLabelPreset(l.preset_key)
                               if (autoManaged) {
                                 return (
                                   <span
                                     key={l.id}
-                                    className="inline-flex items-center gap-1 rounded-md border px-1.5 py-0.5 text-[10px] font-semibold max-w-[200px]"
+                                    className="inline-flex items-center gap-1 rounded-md border px-1.5 py-0.5 text-[10px] font-semibold max-w-[160px] shrink-0"
                                     style={inboxLabelChipStyle(l.color)}
                                     title="Managed automatically"
                                   >
@@ -5659,7 +6050,7 @@ export default function DashboardPage() {
                                 type="button"
                                 disabled={inboxLabelRowBusy === l.id}
                                 onClick={() => void applyInboxLabelOnThread(l.id, false, l)}
-                                className="inline-flex items-center gap-1 rounded-md border px-1.5 py-0.5 text-[10px] font-semibold max-w-[200px] group disabled:opacity-40"
+                                className="inline-flex items-center gap-1 rounded-md border px-1.5 py-0.5 text-[10px] font-semibold max-w-[160px] shrink-0 group disabled:opacity-40"
                                 style={inboxLabelChipStyle(l.color)}
                                 title="Remove label"
                               >
@@ -5792,7 +6183,12 @@ export default function DashboardPage() {
                           </div>
                         </div>
                       ) : null}
-                      <div ref={threadScrollRef} className="admin-inbox-chat-messages p-3 pb-4 space-y-3">
+                      <div className="admin-inbox-chat-messages relative min-h-0">
+                      <div
+                        ref={threadScrollRef}
+                        className="admin-inbox-chat-messages-scroll h-full min-h-0 overflow-x-hidden overflow-y-auto overscroll-y-contain p-3 pb-4 space-y-3"
+                        onScroll={updateScrollToLatestVisibility}
+                      >
                         {threadLoading ? (
                           <div className="flex justify-center py-12">
                             <Loader2 className="w-6 h-6 animate-spin admin-accent-spinner" />
@@ -5934,7 +6330,19 @@ export default function DashboardPage() {
                         )}
                         <div ref={threadEndRef} className="h-px w-full" aria-hidden />
                       </div>
-                      <div className="admin-inbox-chat-composer p-2.5 border-t border-slate-200 space-y-2 bg-white relative z-10">
+                      {showScrollToLatest ? (
+                        <button
+                          type="button"
+                          onClick={() => scrollThreadToLatest('smooth')}
+                          className="absolute bottom-3 right-3 z-20 flex h-10 w-10 items-center justify-center rounded-full border border-slate-200 bg-white text-slate-700 shadow-lg shadow-slate-900/15 hover:bg-slate-50 hover:text-slate-900 active:scale-95"
+                          aria-label="Jump to latest message"
+                          title="Jump to latest message"
+                        >
+                          <ChevronDown className="h-5 w-5" strokeWidth={2.5} />
+                        </button>
+                      ) : null}
+                      </div>
+                      <div className="admin-inbox-chat-composer border-t border-slate-200 space-y-1.5 bg-white relative z-10 px-2 pt-2 pb-[max(0.5rem,env(safe-area-inset-bottom))] sm:p-2.5 sm:pb-2.5 sm:space-y-2">
                         {peerCustomerTyping ? (
                           <p className="text-xs text-slate-500" aria-live="polite">
                             {selectedConvo.customerName} is typing...
@@ -5979,12 +6387,12 @@ export default function DashboardPage() {
                           onChange={onReplyImagePick}
                         />
                         {replyPendingImage ? (
-                          <div className="relative rounded-xl overflow-hidden border border-slate-200 max-h-32 w-fit max-w-full">
+                          <div className="relative rounded-xl overflow-hidden border border-slate-200 max-h-24 sm:max-h-32 w-fit max-w-full">
                             {/* eslint-disable-next-line @next/next/no-img-element */}
                             <img
                               src={replyPendingImage.previewUrl}
                               alt="Attachment preview"
-                              className="max-h-32 w-auto max-w-full object-contain bg-slate-100"
+                              className="max-h-24 sm:max-h-32 w-auto max-w-full object-contain bg-slate-100"
                             />
                             <button
                               type="button"
@@ -5996,7 +6404,7 @@ export default function DashboardPage() {
                             </button>
                           </div>
                         ) : null}
-                        <div className="flex gap-2 items-end">
+                        <div className="flex gap-1.5 sm:gap-2 items-end">
                           <button
                             type="button"
                             onClick={() => replyImageInputRef.current?.click()}
@@ -6146,7 +6554,7 @@ export default function DashboardPage() {
                           </div>
                           <textarea
                             rows={1}
-                            className="flex-1 min-w-0 bg-white border border-slate-200 rounded-xl px-3 py-2.5 text-sm text-slate-900 outline-none focus:border-[#6f54ff] resize-none min-h-[42px] max-h-32"
+                            className="flex-1 min-w-0 bg-white border border-slate-200 rounded-xl px-3 py-2.5 text-sm text-slate-900 outline-none focus:border-[#6f54ff] resize-none min-h-[42px] max-h-28 sm:max-h-32"
                             placeholder={replyIsInternal ? 'Internal note for staff...' : 'Reply or add a caption...'}
                             value={replyDraft}
                             onChange={(e) => setReplyDraft(e.target.value)}
@@ -6161,7 +6569,7 @@ export default function DashboardPage() {
                             type="button"
                             disabled={replyBusy || (!replyDraft.trim() && !replyPendingImage)}
                             onClick={() => void sendReply()}
-                            className="shrink-0 rounded-xl px-3.5 py-2.5 font-semibold admin-btn-gradient"
+                            className="shrink-0 rounded-xl px-3 sm:px-3.5 py-2.5 font-semibold admin-btn-gradient min-h-[42px]"
                           >
                             Send
                           </button>
@@ -6174,7 +6582,7 @@ export default function DashboardPage() {
                     </>
                   ) : (
                     <div className="h-full flex items-center justify-center px-5 text-center text-slate-500 text-sm">
-                      Select a conversation from the left to open thread details.
+                      Select a conversation to open the thread.
                     </div>
                   )}
                 </div>
@@ -6324,7 +6732,7 @@ export default function DashboardPage() {
                               type="button"
                               disabled={reviewBusyId === cust.id}
                               onClick={() => void reviewCustomer(cust.id, 'approve')}
-                              className="rounded-xl py-2 font-semibold bg-emerald-500/90 hover:bg-emerald-500 disabled:opacity-40"
+                              className="rounded-xl py-2.5 min-h-[2.75rem] font-semibold bg-emerald-500/90 hover:bg-emerald-500 disabled:opacity-40"
                             >
                               {reviewBusyId === cust.id ? '—' : 'Approve'}
                             </button>
@@ -6332,7 +6740,7 @@ export default function DashboardPage() {
                               type="button"
                               disabled={reviewBusyId === cust.id}
                               onClick={() => void reviewCustomer(cust.id, 'reject')}
-                              className="rounded-xl py-2 font-semibold bg-red-500/90 hover:bg-red-500 disabled:opacity-40"
+                              className="rounded-xl py-2.5 min-h-[2.75rem] font-semibold bg-red-500/90 hover:bg-red-500 disabled:opacity-40"
                             >
                               Reject
                             </button>
@@ -6340,7 +6748,7 @@ export default function DashboardPage() {
                               type="button"
                               disabled={reviewBusyId === cust.id}
                               onClick={() => void reviewCustomer(cust.id, 'block')}
-                              className="rounded-xl py-2 font-semibold admin-btn-violet disabled:opacity-40"
+                              className="rounded-xl py-2.5 min-h-[2.75rem] font-semibold admin-btn-violet disabled:opacity-40"
                             >
                               Block
                             </button>
@@ -7158,43 +7566,138 @@ export default function DashboardPage() {
       </main>
 
       <nav
-        className={`juwa2-footer-bar admin-mobile-nav fixed bottom-0 left-0 right-0 lg:hidden px-1 py-2 pb-[max(0.5rem,env(safe-area-inset-bottom))] grid ${mobileGridClass}`}
+        className={`juwa2-footer-bar admin-mobile-nav fixed bottom-0 left-0 right-0 z-40 px-1.5 pt-1.5 pb-[max(0.5rem,env(safe-area-inset-bottom))] grid ${mobileGridClass} ${
+          mobileInboxFocus ? 'hidden' : 'lg:hidden'
+        }`}
       >
-        {navItems.map((item) => {
+        {mobilePrimaryNav.primary.map((item) => {
           const Icon = item.icon
-          const active = activeTab === item.id
+          const active = !mobileMoreOpen && activeTab === item.id
           return (
             <button
               key={item.id}
               type="button"
               onClick={() => switchTab(item.id)}
-              className={`admin-mobile-nav-item flex flex-col items-center gap-0.5 py-1.5 min-w-0 relative ${
+              className={`admin-mobile-nav-item flex flex-col items-center justify-center gap-0.5 py-2 min-h-[3.25rem] min-w-0 relative ${
                 active ? 'is-active' : ''
               }`}
             >
               <span className="relative inline-flex">
-                <Icon className="w-[21px] h-[21px] shrink-0" />
+                <Icon className="w-[22px] h-[22px] shrink-0" />
                 {item.id === 'inbox-website' && inboxWebsiteUnreadTotal > 0 ? (
-                  <span className="absolute top-1 right-[calc(50%-1.25rem)] min-w-3.5 h-3.5 px-0.5 rounded-full bg-[#ff3b5c] text-white text-[8px] font-bold flex items-center justify-center leading-none tabular-nums border-2 border-[#0c1220]">
-                    {inboxWebsiteUnreadTotal > 9 ? '9+' : inboxWebsiteUnreadTotal}
+                  <span className="absolute -top-1 -right-2.5 min-w-3.5 h-3.5 px-0.5 rounded-full bg-[#ff3b5c] text-white text-[8px] font-bold flex items-center justify-center leading-none tabular-nums border-2 border-[#0c1220]">
+                    {inboxWebsiteUnreadTotal > 99 ? '99+' : inboxWebsiteUnreadTotal}
                   </span>
                 ) : null}
                 {item.id === 'inbox-app' && inboxAppUnreadTotal > 0 ? (
-                  <span className="absolute top-1 right-[calc(50%-1.25rem)] min-w-3.5 h-3.5 px-0.5 rounded-full bg-[#ff3b5c] text-white text-[8px] font-bold flex items-center justify-center leading-none tabular-nums border-2 border-[#0c1220]">
-                    {inboxAppUnreadTotal > 9 ? '9+' : inboxAppUnreadTotal}
+                  <span className="absolute -top-1 -right-2.5 min-w-3.5 h-3.5 px-0.5 rounded-full bg-[#ff3b5c] text-white text-[8px] font-bold flex items-center justify-center leading-none tabular-nums border-2 border-[#0c1220]">
+                    {inboxAppUnreadTotal > 99 ? '99+' : inboxAppUnreadTotal}
                   </span>
                 ) : null}
                 {item.id === 'inbox-technical' && inboxTechnicalUnreadTotal > 0 ? (
-                  <span className="absolute top-1 right-[calc(50%-1.25rem)] min-w-3.5 h-3.5 px-0.5 rounded-full bg-[#f97316] text-white text-[8px] font-bold flex items-center justify-center leading-none tabular-nums border-2 border-[#0c1220]">
-                    {inboxTechnicalUnreadTotal > 9 ? '9+' : inboxTechnicalUnreadTotal}
+                  <span className="absolute -top-1 -right-2.5 min-w-3.5 h-3.5 px-0.5 rounded-full bg-[#f97316] text-white text-[8px] font-bold flex items-center justify-center leading-none tabular-nums border-2 border-[#0c1220]">
+                    {inboxTechnicalUnreadTotal > 99 ? '99+' : inboxTechnicalUnreadTotal}
                   </span>
                 ) : null}
               </span>
-              <span className="text-[10px] font-semibold leading-tight text-center truncate w-full px-0.5">{item.label}</span>
+              <span className="text-[10px] font-semibold leading-tight text-center truncate w-full px-0.5">
+                {item.label}
+              </span>
             </button>
           )
         })}
+        {mobilePrimaryNav.more.length > 0 ? (
+          <button
+            type="button"
+            onClick={() => setMobileMoreOpen((open) => !open)}
+            className={`admin-mobile-nav-item flex flex-col items-center justify-center gap-0.5 py-2 min-h-[3.25rem] min-w-0 relative ${
+              moreTabActive ? 'is-active' : ''
+            }`}
+            aria-expanded={mobileMoreOpen}
+            aria-label="More navigation"
+          >
+            <span className="relative inline-flex">
+              <MoreHorizontal className="w-[22px] h-[22px] shrink-0" />
+              {(mobilePrimaryNav.more.some((item) => item.id === 'inbox-technical') &&
+                inboxTechnicalUnreadTotal > 0) ||
+              (mobilePrimaryNav.more.some((item) => item.id === 'inbox-website') &&
+                inboxWebsiteUnreadTotal > 0) ||
+              (mobilePrimaryNav.more.some((item) => item.id === 'inbox-app') &&
+                inboxAppUnreadTotal > 0) ? (
+                <span className="absolute -top-1 -right-2.5 min-w-3.5 h-3.5 px-0.5 rounded-full bg-[#ff3b5c] text-white text-[8px] font-bold flex items-center justify-center leading-none tabular-nums border-2 border-[#0c1220]">
+                  !
+                </span>
+              ) : null}
+            </span>
+            <span className="text-[10px] font-semibold leading-tight text-center truncate w-full px-0.5">
+              More
+            </span>
+          </button>
+        ) : null}
       </nav>
+
+      {mobileMoreOpen && !mobileInboxFocus ? (
+        <div className="fixed inset-0 z-50 lg:hidden" role="dialog" aria-modal="true" aria-label="More tools">
+          <button
+            type="button"
+            className="absolute inset-0 bg-black/55"
+            aria-label="Close more menu"
+            onClick={() => setMobileMoreOpen(false)}
+          />
+          <div className="admin-mobile-more-sheet absolute bottom-0 left-0 right-0 max-h-[min(72vh,560px)] overflow-y-auto rounded-t-2xl px-3 pt-3 pb-[max(1rem,env(safe-area-inset-bottom))]">
+            <div className="mx-auto mb-3 h-1 w-10 rounded-full bg-white/20" aria-hidden />
+            <div className="flex items-center justify-between gap-2 mb-3 px-0.5">
+              <p className="text-[13px] font-semibold text-white">More tools</p>
+              <button
+                type="button"
+                onClick={() => setMobileMoreOpen(false)}
+                className="admin-chrome-btn inline-flex h-8 w-8 items-center justify-center rounded-lg"
+                aria-label="Close"
+              >
+                <X className="w-4 h-4" />
+              </button>
+            </div>
+            <div className="grid grid-cols-3 gap-2 sm:grid-cols-4">
+              {mobilePrimaryNav.more.map((item) => {
+                const Icon = item.icon
+                const active = activeTab === item.id
+                const badge =
+                  item.id === 'inbox-website'
+                    ? inboxWebsiteUnreadTotal
+                    : item.id === 'inbox-app'
+                      ? inboxAppUnreadTotal
+                      : item.id === 'inbox-technical'
+                        ? inboxTechnicalUnreadTotal
+                        : 0
+                return (
+                  <button
+                    key={item.id}
+                    type="button"
+                    onClick={() => switchTab(item.id)}
+                    className={`admin-mobile-more-item relative flex flex-col items-center gap-1.5 rounded-xl px-2 py-3 text-center ${
+                      active ? 'is-active' : ''
+                    }`}
+                  >
+                    <span className="relative inline-flex">
+                      <Icon className="w-5 h-5" />
+                      {badge > 0 ? (
+                        <span
+                          className={`absolute -top-1.5 -right-2.5 min-w-3.5 h-3.5 px-0.5 rounded-full text-white text-[8px] font-bold flex items-center justify-center leading-none tabular-nums border-2 border-[#0c1220] ${
+                            item.id === 'inbox-technical' ? 'bg-[#f97316]' : 'bg-[#ff3b5c]'
+                          }`}
+                        >
+                          {badge > 9 ? '9+' : badge}
+                        </span>
+                      ) : null}
+                    </span>
+                    <span className="text-[11px] font-semibold leading-tight">{item.label}</span>
+                  </button>
+                )
+              })}
+            </div>
+          </div>
+        </div>
+      ) : null}
 
       {escalateModalOpen ? (
         <div

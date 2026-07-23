@@ -2,6 +2,7 @@
 
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import {
+  ArrowLeft,
   Check,
   Clipboard,
   Clock3,
@@ -53,6 +54,7 @@ export function TicketsSection({
   const [tickets, setTickets] = useState<SupportTicket[]>([])
   const [hasMore, setHasMore] = useState(false)
   const [selectedTicketId, setSelectedTicketId] = useState<string | null>(null)
+  const [mobileDetailOpen, setMobileDetailOpen] = useState(false)
   const [statusFilter, setStatusFilter] = useState<'all' | SupportTicketStatus>('open')
   const [query, setQuery] = useState('')
   const [debouncedQuery, setDebouncedQuery] = useState('')
@@ -94,7 +96,9 @@ export function TicketsSection({
         if (!append) {
           setSelectedTicketId((current) => {
             if (current && page.some((ticket) => ticket.id === current)) return current
-            return page[0]?.id ?? null
+            const desktop =
+              typeof window !== 'undefined' && window.matchMedia('(min-width: 1024px)').matches
+            return desktop ? (page[0]?.id ?? null) : null
           })
         }
       } catch (error) {
@@ -129,6 +133,7 @@ export function TicketsSection({
       )
       setStatusFilter(linked.status)
       setSelectedTicketId(linked.id)
+      setMobileDetailOpen(true)
     })()
   }, [initialTicketId])
 
@@ -204,6 +209,7 @@ export function TicketsSection({
             if (selected !== updated.id) return selected
             return next[0]?.id ?? null
           })
+          setMobileDetailOpen(false)
           return next
         })
         return
@@ -222,7 +228,11 @@ export function TicketsSection({
 
   return (
     <section className="flex min-h-0 flex-1 flex-col gap-3">
-      <div className="flex shrink-0 flex-wrap items-center justify-between gap-3">
+      <div
+        className={`flex shrink-0 flex-wrap items-center justify-between gap-3 ${
+          mobileDetailOpen ? 'max-lg:hidden' : ''
+        }`}
+      >
         <div>
           <p className="text-[11px] font-semibold uppercase tracking-[0.16em] text-violet-600">
             Support tickets
@@ -243,7 +253,11 @@ export function TicketsSection({
       </div>
 
       <div className="grid min-h-0 flex-1 overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-sm lg:grid-cols-[minmax(280px,0.9fr)_minmax(0,1.6fr)]">
-        <aside className="flex min-h-0 flex-col border-r border-slate-200">
+        <aside
+          className={`flex min-h-0 flex-col border-r border-slate-200 ${
+            mobileDetailOpen ? 'max-lg:hidden' : ''
+          }`}
+        >
           <div className="space-y-2 border-b border-slate-200 p-3">
             <div className="relative">
               <Search className="absolute left-2.5 top-1/2 h-4 w-4 -translate-y-1/2 text-slate-400" />
@@ -266,8 +280,11 @@ export function TicketsSection({
                 <button
                   key={value}
                   type="button"
-                  onClick={() => setStatusFilter(value)}
-                  className={`rounded-lg px-2.5 py-1 text-[10px] font-semibold ${
+                  onClick={() => {
+                    setStatusFilter(value)
+                    setMobileDetailOpen(false)
+                  }}
+                  className={`rounded-lg px-2.5 py-1.5 text-[11px] font-semibold min-h-[2rem] ${
                     statusFilter === value
                       ? 'bg-violet-100 text-violet-800'
                       : 'text-slate-500 hover:bg-slate-100'
@@ -295,15 +312,18 @@ export function TicketsSection({
                 <button
                   key={ticket.id}
                   type="button"
-                  onClick={() => setSelectedTicketId(ticket.id)}
-                  className={`block w-full border-b border-slate-100 p-3 text-left transition ${
+                  onClick={() => {
+                    setSelectedTicketId(ticket.id)
+                    setMobileDetailOpen(true)
+                  }}
+                  className={`block w-full border-b border-slate-100 p-3.5 text-left transition ${
                     selectedTicketId === ticket.id
                       ? 'border-l-2 border-l-violet-500 bg-violet-50'
                       : 'hover:bg-slate-50'
                   }`}
                 >
                   <div className="flex items-start justify-between gap-2">
-                    <p className="min-w-0 truncate text-[12px] font-bold text-slate-900">
+                    <p className="min-w-0 truncate text-[13px] font-bold text-slate-900">
                       {customerDisplayName(ticket)}
                     </p>
                     <span
@@ -347,7 +367,11 @@ export function TicketsSection({
           </div>
         </aside>
 
-        <div className="admin-inbox-scroll min-h-0 overflow-y-auto">
+        <div
+          className={`admin-inbox-scroll min-h-0 overflow-y-auto ${
+            mobileDetailOpen ? '' : 'max-lg:hidden'
+          }`}
+        >
           {!selectedTicket ? (
             <div className="flex h-full items-center justify-center p-8 text-center text-sm text-slate-500">
               Select a ticket, or search by ticket number.
@@ -356,9 +380,17 @@ export function TicketsSection({
             <div className="space-y-5 p-4 sm:p-5">
               <header className="border-b border-slate-200 pb-4">
                 <div className="flex flex-wrap items-start justify-between gap-3">
-                  <div className="flex items-center gap-2">
-                    <TicketIcon className="h-5 w-5 text-violet-600" />
-                    <h4 className="font-mono text-xl font-bold tracking-tight text-slate-900">
+                  <div className="flex items-center gap-2 min-w-0">
+                    <button
+                      type="button"
+                      onClick={() => setMobileDetailOpen(false)}
+                      className="lg:hidden inline-flex h-9 w-9 shrink-0 items-center justify-center rounded-lg border border-slate-200 bg-slate-50 text-slate-700 hover:bg-slate-100"
+                      aria-label="Back to ticket list"
+                    >
+                      <ArrowLeft className="h-4 w-4" />
+                    </button>
+                    <TicketIcon className="h-5 w-5 text-violet-600 shrink-0" />
+                    <h4 className="font-mono text-lg sm:text-xl font-bold tracking-tight text-slate-900 truncate">
                       {displayTicketNumber(selectedTicket.ticket_number)}
                     </h4>
                     <button
@@ -393,7 +425,7 @@ export function TicketsSection({
                     onClick={() =>
                       void copyText('signal', formatTicketForSignal(selectedTicket))
                     }
-                    className="inline-flex items-center gap-2 rounded-xl bg-violet-600 px-4 py-2.5 text-[12px] font-semibold text-white hover:bg-violet-700"
+                    className="inline-flex min-h-[2.75rem] items-center gap-2 rounded-xl bg-violet-600 px-4 py-2.5 text-[12px] font-semibold text-white hover:bg-violet-700"
                   >
                     {copied === 'signal' ? (
                       <Check className="h-4 w-4" />
@@ -405,7 +437,7 @@ export function TicketsSection({
                   <button
                     type="button"
                     onClick={() => onOpenCustomerChat(selectedTicket.conversation_id)}
-                    className="inline-flex items-center gap-2 rounded-xl border border-slate-200 bg-white px-4 py-2.5 text-[12px] font-semibold text-slate-700 hover:bg-slate-50"
+                    className="inline-flex min-h-[2.75rem] items-center gap-2 rounded-xl border border-slate-200 bg-white px-4 py-2.5 text-[12px] font-semibold text-slate-700 hover:bg-slate-50"
                   >
                     <MessageSquare className="h-4 w-4" />
                     Open chat
@@ -415,7 +447,7 @@ export function TicketsSection({
                       type="button"
                       disabled={busy}
                       onClick={() => void setTicketStatus('closed')}
-                      className="inline-flex items-center gap-2 rounded-xl border border-slate-200 bg-slate-50 px-4 py-2.5 text-[12px] font-semibold text-slate-700 hover:bg-slate-100 disabled:opacity-40"
+                      className="inline-flex min-h-[2.75rem] items-center gap-2 rounded-xl border border-slate-200 bg-slate-50 px-4 py-2.5 text-[12px] font-semibold text-slate-700 hover:bg-slate-100 disabled:opacity-40"
                     >
                       {busy ? <Loader2 className="h-4 w-4 animate-spin" /> : null}
                       Mark closed
@@ -425,7 +457,7 @@ export function TicketsSection({
                       type="button"
                       disabled={busy}
                       onClick={() => void setTicketStatus('open')}
-                      className="inline-flex items-center gap-2 rounded-xl border border-slate-200 bg-slate-50 px-4 py-2.5 text-[12px] font-semibold text-slate-700 hover:bg-slate-100 disabled:opacity-40"
+                      className="inline-flex min-h-[2.75rem] items-center gap-2 rounded-xl border border-slate-200 bg-slate-50 px-4 py-2.5 text-[12px] font-semibold text-slate-700 hover:bg-slate-100 disabled:opacity-40"
                     >
                       Reopen
                     </button>
