@@ -30,6 +30,7 @@
 --    23) Run  20_support_ticket_performance.sql  (indexes for paginated ticket lists)
 --    24) Run  21_simplify_tickets_for_signal.sql  (undo handoff notes/unread; simple Signal tickets)
 --    25) Run  22_easy_ticket_numbers_and_customer_name.sql  (J2-1 style numbers + customer name)
+--    26) Run  23_customer_game_credentials.sql  (multi-platform game usernames per customer)
 --
 --   SCENARIO B — Bootstrap already ran; "already exists" / policy errors
 --     Run 3_extras.sql, 5_game_sso.sql, and 6_auto_approve_customers.sql as needed  (safe to re-run)

@@ -19,6 +19,7 @@ import {
   ChevronRight,
   ChevronDown,
   ClipboardList,
+  Copy,
   Maximize2,
   Menu,
   ImagePlus,
@@ -109,6 +110,19 @@ import {
   INBOX_LIST_MAX_ROWS,
 } from '@/lib/staffInbox'
 import { listBusinessMemberProfiles } from '@/lib/resolveCustomerRecipient'
+import {
+  deleteCustomerGameCredential,
+  fetchCustomerGameCredentials,
+  formatCredentialsHeaderShort,
+  GAME_CREDENTIAL_PLATFORMS,
+  gameCredentialPlatformLabel,
+  insertCustomerGameCredential,
+  isGameCredentialPlatform,
+  pickDefaultGameUsername,
+  updateCustomerGameCredential,
+  type CustomerGameCredential,
+  type GameCredentialPlatform,
+} from '@/lib/customerGameCredentials'
 import { StaffMultiTabPanel, StaffTabPanel, StaffUsersSubPanel } from '@/components/StaffTabPanel'
 
 type AppTab = 'home' | 'post' | InboxChannelTab | 'tickets' | 'inbox-technical' | 'users' | 'notify' | 'reports' | 'team'
@@ -743,6 +757,8 @@ export default function DashboardPage() {
   const [usersLoading, setUsersLoading] = useState(false)
   const [usersRefreshing, setUsersRefreshing] = useState(false)
   const [inboxContactOpen, setInboxContactOpen] = useState(false)
+  const inboxContactPopoverRef = useRef<HTMLDivElement>(null)
+  const inboxContactTriggerRef = useRef<HTMLButtonElement>(null)
   const [showScrollToLatest, setShowScrollToLatest] = useState(false)
   const [staffNotifyUnread, setStaffNotifyUnread] = useState(0)
   const [inboxRefreshing, setInboxRefreshing] = useState(false)
@@ -808,8 +824,13 @@ export default function DashboardPage() {
   const [escalateModalOpen, setEscalateModalOpen] = useState(false)
   const [escalateReasonDraft, setEscalateReasonDraft] = useState('')
   const [replyToMessage, setReplyToMessage] = useState<ThreadMessage | null>(null)
-  const [staffGameUsernameDraft, setStaffGameUsernameDraft] = useState('')
-  const [staffGameUsernameBusy, setStaffGameUsernameBusy] = useState(false)
+  const [customerGameCredentials, setCustomerGameCredentials] = useState<CustomerGameCredential[]>([])
+  const [gameCredPlatformDraft, setGameCredPlatformDraft] = useState<GameCredentialPlatform>('juwa')
+  const [gameCredUsernameDraft, setGameCredUsernameDraft] = useState('')
+  const [gameCredEditingId, setGameCredEditingId] = useState<string | null>(null)
+  const [gameCredBusy, setGameCredBusy] = useState(false)
+  const [gameCredDeleteBusyId, setGameCredDeleteBusyId] = useState<string | null>(null)
+  const [gameCredCopiedId, setGameCredCopiedId] = useState<string | null>(null)
   const threadReloadSeqRef = useRef(0)
   const threadReloadDebounceRef = useRef<number | null>(null)
   const [escalationActionBusy, setEscalationActionBusy] = useState(false)
@@ -1908,6 +1929,26 @@ export default function DashboardPage() {
   useEffect(() => {
     setInboxContactOpen(false)
   }, [selectedConvoId])
+
+  useEffect(() => {
+    if (!inboxContactOpen) return
+    function onDoc(e: MouseEvent) {
+      const target = e.target as Node
+      const panel = inboxContactPopoverRef.current
+      const trigger = inboxContactTriggerRef.current
+      if (panel?.contains(target) || trigger?.contains(target)) return
+      setInboxContactOpen(false)
+    }
+    function onKey(e: KeyboardEvent) {
+      if (e.key === 'Escape') setInboxContactOpen(false)
+    }
+    document.addEventListener('mousedown', onDoc)
+    document.addEventListener('keydown', onKey)
+    return () => {
+      document.removeEventListener('mousedown', onDoc)
+      document.removeEventListener('keydown', onKey)
+    }
+  }, [inboxContactOpen])
 
   useEffect(() => {
     if (!inboxLabelsPopoverOpen) return
@@ -3435,25 +3476,118 @@ export default function DashboardPage() {
 
   markActiveThreadReadRef.current = markActiveThreadRead
 
-  async function saveStaffGameUsername() {
-    if (!selectedConvoId || !profile) return
-    const trimmed = staffGameUsernameDraft.trim()
-    setStaffGameUsernameBusy(true)
+  async function loadCustomerGameCredentialsForConvo(conv: ConvoListItem | undefined) {
+    if (!conv || !profile?.business_id) {
+      setCustomerGameCredentials([])
+      return
+    }
     try {
-      const { error } = await supabase
-        .from('conversations')
-        .update({ staff_game_username: trimmed || null })
-        .eq('id', selectedConvoId)
-      if (error) throw error
-      setConvoList((prev) =>
-        prev.map((c) =>
-          c.id === selectedConvoId ? { ...c, staffGameUsername: trimmed || null } : c
-        )
+      const rows = await fetchCustomerGameCredentials(
+        supabase,
+        profile.business_id,
+        conv.customer_id
       )
+      setCustomerGameCredentials(rows)
+      setGameCredEditingId(null)
+      setGameCredUsernameDraft('')
+      setGameCredPlatformDraft('juwa')
     } catch (e) {
-      alert(e instanceof Error ? e.message : 'Could not save game username.')
+      console.error(e)
+      setCustomerGameCredentials([])
+    }
+  }
+
+  async function mirrorStaffGameUsername(conversationId: string, username: string | null) {
+    const { error } = await supabase
+      .from('conversations')
+      .update({ staff_game_username: username })
+      .eq('id', conversationId)
+    if (error) throw error
+    setConvoList((prev) =>
+      prev.map((c) =>
+        c.id === conversationId ? { ...c, staffGameUsername: username } : c
+      )
+    )
+  }
+
+  async function saveCustomerGameCredential() {
+    if (!selectedConvoId || !profile?.business_id) return
+    const conv = convoListRef.current.find((c) => c.id === selectedConvoId)
+    if (!conv) return
+    const trimmed = gameCredUsernameDraft.trim()
+    if (!trimmed) {
+      alert('Enter a game username.')
+      return
+    }
+    setGameCredBusy(true)
+    try {
+      if (gameCredEditingId) {
+        await updateCustomerGameCredential(supabase, {
+          id: gameCredEditingId,
+          platform: gameCredPlatformDraft,
+          username: trimmed,
+        })
+      } else {
+        await insertCustomerGameCredential(supabase, {
+          businessId: profile.business_id,
+          customerId: conv.customer_id,
+          platform: gameCredPlatformDraft,
+          username: trimmed,
+          createdBy: profile.id,
+        })
+      }
+      const rows = await fetchCustomerGameCredentials(
+        supabase,
+        profile.business_id,
+        conv.customer_id
+      )
+      setCustomerGameCredentials(rows)
+      const juwaUsername = rows.find((r) => r.platform === 'juwa')?.username ?? null
+      await mirrorStaffGameUsername(selectedConvoId, juwaUsername)
+      setGameCredEditingId(null)
+      setGameCredUsernameDraft('')
+    } catch (e) {
+      alert(e instanceof Error ? e.message : 'Could not save game credential.')
     } finally {
-      setStaffGameUsernameBusy(false)
+      setGameCredBusy(false)
+    }
+  }
+
+  async function removeCustomerGameCredential(credentialId: string) {
+    if (!selectedConvoId || !profile?.business_id) return
+    const conv = convoListRef.current.find((c) => c.id === selectedConvoId)
+    if (!conv) return
+    setGameCredDeleteBusyId(credentialId)
+    try {
+      await deleteCustomerGameCredential(supabase, credentialId)
+      const rows = await fetchCustomerGameCredentials(
+        supabase,
+        profile.business_id,
+        conv.customer_id
+      )
+      setCustomerGameCredentials(rows)
+      const juwaUsername = rows.find((r) => r.platform === 'juwa')?.username ?? null
+      await mirrorStaffGameUsername(selectedConvoId, juwaUsername)
+      if (gameCredEditingId === credentialId) {
+        setGameCredEditingId(null)
+        setGameCredUsernameDraft('')
+      }
+    } catch (e) {
+      alert(e instanceof Error ? e.message : 'Could not remove game credential.')
+    } finally {
+      setGameCredDeleteBusyId(null)
+    }
+  }
+
+  async function copyCustomerGameUsername(credentialId: string, username: string) {
+    try {
+      await navigator.clipboard.writeText(username)
+      setGameCredCopiedId(credentialId)
+      window.setTimeout(() => {
+        setGameCredCopiedId((current) => (current === credentialId ? null : current))
+      }, 1500)
+    } catch {
+      alert('Could not copy username.')
     }
   }
 
@@ -3508,8 +3642,14 @@ export default function DashboardPage() {
     setReplyDraft(options?.initialDraft ?? '')
     clearReplyPendingImage()
     const conv = convoListRef.current.find((c) => c.id === conversationId)
-    setStaffGameUsernameDraft(conv?.staffGameUsername ?? '')
-    await reloadThreadMessages(conversationId, { markRead: true, showLoading: true })
+    setGameCredPlatformDraft('juwa')
+    setGameCredUsernameDraft('')
+    setGameCredEditingId(null)
+    setCustomerGameCredentials([])
+    await Promise.all([
+      reloadThreadMessages(conversationId, { markRead: true, showLoading: true }),
+      loadCustomerGameCredentialsForConvo(conv),
+    ])
   }
 
   async function markSelectedThreadReadWithoutReply() {
@@ -4615,6 +4755,15 @@ export default function DashboardPage() {
             ? 'grid-cols-2'
             : 'grid-cols-1'
   const selectedConvo = convoListForInbox.find((c) => c.id === selectedConvoId) || null
+  const selectedCredentialsHeader =
+    formatCredentialsHeaderShort(customerGameCredentials) ||
+    (selectedConvo?.staffGameUsername
+      ? `Juwa: ${selectedConvo.staffGameUsername}`
+      : '')
+  const selectedTicketGameUsername =
+    pickDefaultGameUsername(customerGameCredentials) ||
+    selectedConvo?.staffGameUsername ||
+    null
   const mobileInboxFocus = isInboxTab(activeTab) && Boolean(selectedConvoId)
   const moreTabActive =
     mobileMoreOpen || mobilePrimaryNav.more.some((item) => item.id === activeTab)
@@ -5869,10 +6018,18 @@ export default function DashboardPage() {
                             <div className="min-w-0">
                               <p className="text-[13px] font-semibold text-slate-900 truncate">
                                 {selectedConvo.customerName}
-                                {selectedConvo.staffGameUsername ? (
-                                  <span className="font-normal text-violet-500 hidden sm:inline">
+                                {selectedCredentialsHeader ? (
+                                  <span
+                                    className="font-normal text-violet-500 hidden sm:inline"
+                                    title={customerGameCredentials
+                                      .map(
+                                        (c) =>
+                                          `${gameCredentialPlatformLabel(c.platform)}: ${c.username}`
+                                      )
+                                      .join('\n')}
+                                  >
                                     {' '}
-                                    · {selectedConvo.staffGameUsername}
+                                    · {selectedCredentialsHeader}
                                   </span>
                                 ) : null}
                               </p>
@@ -5922,13 +6079,17 @@ export default function DashboardPage() {
                               <Tag className="w-5 h-5" />
                             </button>
                             <button
+                              ref={inboxContactTriggerRef}
                               type="button"
                               onClick={() => {
                                 setInboxLabelsPopoverOpen(false)
                                 setInboxContactOpen((v) => !v)
                               }}
-                              className="p-2 rounded-lg text-slate-500 hover:text-slate-900 hover:bg-slate-100"
-                              aria-label="Open contact profile"
+                              className={`p-2 rounded-lg hover:bg-slate-100 ${
+                                inboxContactOpen ? 'text-slate-900 bg-slate-100' : 'text-slate-500 hover:text-slate-900'
+                              }`}
+                              aria-expanded={inboxContactOpen}
+                              aria-label={inboxContactOpen ? 'Close contact profile' : 'Open contact profile'}
                             >
                               <MoreHorizontal className="w-5 h-5" />
                             </button>
@@ -6105,7 +6266,7 @@ export default function DashboardPage() {
                           conversationId={selectedConvo.id}
                           staffId={profile.id}
                           canCreate
-                          defaultGameUsername={selectedConvo.staffGameUsername ?? null}
+                          defaultGameUsername={selectedTicketGameUsername}
                           existingChatImages={threadMessages
                             .filter(
                               (message) => !message.is_internal && Boolean(message.image_url)
@@ -6124,8 +6285,21 @@ export default function DashboardPage() {
                       ) : null}
                       </div>
                       {inboxContactOpen ? (
-                        <div className="absolute top-[62px] right-3 z-20 w-[280px] rounded-2xl border border-slate-200 bg-white p-4 space-y-3 shadow-lg">
-                          <p className="text-sm font-semibold text-slate-900">Contact profile</p>
+                        <div
+                          ref={inboxContactPopoverRef}
+                          className="absolute top-[62px] right-3 z-20 w-[min(320px,calc(100vw-1.5rem))] rounded-2xl border border-slate-200 bg-white p-4 space-y-3 shadow-lg"
+                        >
+                          <div className="flex items-center justify-between gap-2">
+                            <p className="text-sm font-semibold text-slate-900">Contact profile</p>
+                            <button
+                              type="button"
+                              onClick={() => setInboxContactOpen(false)}
+                              className="p-1 rounded-md text-slate-500 hover:text-slate-900 hover:bg-slate-100"
+                              aria-label="Close contact profile"
+                            >
+                              <X className="w-4 h-4" />
+                            </button>
+                          </div>
                           <div className="flex items-center gap-3">
                             <div className="w-12 h-12 rounded-full bg-[#6f54ff] overflow-hidden flex items-center justify-center font-bold">
                               {selectedConvo.customerAvatar ? (
@@ -6137,43 +6311,136 @@ export default function DashboardPage() {
                             <div className="min-w-0">
                               <p className="font-semibold text-slate-900 truncate">
                                 {selectedConvo.customerName}
-                                {selectedConvo.staffGameUsername ? (
-                                  <span className="font-normal text-violet-500">
-                                    {' '}
-                                    · {selectedConvo.staffGameUsername}
-                                  </span>
-                                ) : null}
                               </p>
                               <p className="text-xs text-slate-500 truncate">@{selectedConvo.customerUsername}</p>
                             </div>
                           </div>
                           <div className="space-y-2">
                             <label className="block text-[11px] font-medium text-slate-500">
-                              Game username <span className="text-slate-400">(staff only)</span>
+                              Game credentials <span className="text-slate-400">(staff only)</span>
                             </label>
-                            <div className="flex gap-1.5">
-                              <input
-                                className="flex-1 min-w-0 bg-slate-50 border border-slate-200 rounded-lg px-2.5 py-2 text-[13px] outline-none focus:border-[#6f54ff]/50"
-                                placeholder="e.g. LuckyPlayer99"
-                                value={staffGameUsernameDraft}
-                                onChange={(e) => setStaffGameUsernameDraft(e.target.value)}
-                                onKeyDown={(e) => {
-                                  if (e.key === 'Enter') {
-                                    e.preventDefault()
-                                    void saveStaffGameUsername()
-                                  }
+                            {customerGameCredentials.length > 0 ? (
+                              <ul className="space-y-1.5">
+                                {customerGameCredentials.map((cred) => (
+                                  <li
+                                    key={cred.id}
+                                    className={`flex items-center gap-1.5 rounded-lg border px-2 py-1.5 ${
+                                      gameCredEditingId === cred.id
+                                        ? 'border-violet-300 bg-violet-50'
+                                        : 'border-slate-100 bg-slate-50'
+                                    }`}
+                                  >
+                                    <button
+                                      type="button"
+                                      className="min-w-0 flex-1 text-left"
+                                      title="Edit in form below"
+                                      onClick={() => {
+                                        setGameCredEditingId(cred.id)
+                                        setGameCredPlatformDraft(cred.platform)
+                                        setGameCredUsernameDraft(cred.username)
+                                      }}
+                                    >
+                                      <span className="block truncate text-[12px] font-medium text-slate-800">
+                                        {gameCredentialPlatformLabel(cred.platform)}
+                                        <span className="font-normal text-slate-500">
+                                          {' '}
+                                          · {cred.username}
+                                        </span>
+                                      </span>
+                                    </button>
+                                    <button
+                                      type="button"
+                                      onClick={() => void copyCustomerGameUsername(cred.id, cred.username)}
+                                      className="shrink-0 rounded-md p-1 text-slate-400 hover:bg-violet-50 hover:text-violet-600"
+                                      aria-label={`Copy username ${cred.username}`}
+                                      title="Copy username"
+                                    >
+                                      {gameCredCopiedId === cred.id ? (
+                                        <Check className="w-3.5 h-3.5 text-emerald-600" />
+                                      ) : (
+                                        <Copy className="w-3.5 h-3.5" />
+                                      )}
+                                    </button>
+                                    <button
+                                      type="button"
+                                      disabled={gameCredDeleteBusyId === cred.id}
+                                      onClick={() => void removeCustomerGameCredential(cred.id)}
+                                      className="shrink-0 rounded-md p-1 text-slate-400 hover:bg-red-50 hover:text-red-600 disabled:opacity-40"
+                                      aria-label={`Remove ${gameCredentialPlatformLabel(cred.platform)} ${cred.username}`}
+                                    >
+                                      {gameCredDeleteBusyId === cred.id ? (
+                                        <Loader2 className="w-3.5 h-3.5 animate-spin" />
+                                      ) : (
+                                        <Trash2 className="w-3.5 h-3.5" />
+                                      )}
+                                    </button>
+                                  </li>
+                                ))}
+                              </ul>
+                            ) : (
+                              <p className="text-[11px] text-slate-400">No platforms saved yet.</p>
+                            )}
+                            <div className="flex flex-col gap-1.5 pt-1">
+                              <select
+                                className="w-full bg-slate-50 border border-slate-200 rounded-lg px-2.5 py-2 text-[13px] outline-none focus:border-[#6f54ff]/50"
+                                value={gameCredPlatformDraft}
+                                onChange={(e) => {
+                                  const next = e.target.value
+                                  if (!isGameCredentialPlatform(next)) return
+                                  setGameCredPlatformDraft(next)
                                 }}
-                              />
-                              <button
-                                type="button"
-                                disabled={staffGameUsernameBusy}
-                                onClick={() => void saveStaffGameUsername()}
-                                className="shrink-0 rounded-lg px-3 py-2 text-[12px] font-semibold bg-[#6f54ff]/20 text-violet-700 hover:bg-[#6f54ff]/30 disabled:opacity-40"
                               >
-                                {staffGameUsernameBusy ? <Loader2 className="w-4 h-4 animate-spin" /> : 'Save'}
-                              </button>
+                                {GAME_CREDENTIAL_PLATFORMS.map((platform) => (
+                                  <option key={platform} value={platform}>
+                                    {gameCredentialPlatformLabel(platform)}
+                                  </option>
+                                ))}
+                              </select>
+                              <div className="flex gap-1.5">
+                                <input
+                                  className="flex-1 min-w-0 bg-slate-50 border border-slate-200 rounded-lg px-2.5 py-2 text-[13px] outline-none focus:border-[#6f54ff]/50"
+                                  placeholder="e.g. LuckyPlayer99"
+                                  value={gameCredUsernameDraft}
+                                  onChange={(e) => setGameCredUsernameDraft(e.target.value)}
+                                  onKeyDown={(e) => {
+                                    if (e.key === 'Enter') {
+                                      e.preventDefault()
+                                      void saveCustomerGameCredential()
+                                    }
+                                  }}
+                                />
+                                <button
+                                  type="button"
+                                  disabled={gameCredBusy}
+                                  onClick={() => void saveCustomerGameCredential()}
+                                  className="shrink-0 rounded-lg px-3 py-2 text-[12px] font-semibold bg-[#6f54ff]/20 text-violet-700 hover:bg-[#6f54ff]/30 disabled:opacity-40"
+                                >
+                                  {gameCredBusy ? (
+                                    <Loader2 className="w-4 h-4 animate-spin" />
+                                  ) : gameCredEditingId ? (
+                                    'Update'
+                                  ) : (
+                                    'Add'
+                                  )}
+                                </button>
+                              </div>
+                              {gameCredEditingId ? (
+                                <button
+                                  type="button"
+                                  className="self-start text-[11px] text-slate-500 hover:text-slate-700"
+                                  onClick={() => {
+                                    setGameCredEditingId(null)
+                                    setGameCredUsernameDraft('')
+                                  }}
+                                >
+                                  Cancel edit
+                                </button>
+                              ) : null}
                             </div>
-                            <p className="text-[10px] text-slate-400">Shown next to their name in chat for quick reference.</p>
+                            <p className="text-[10px] text-slate-400">
+                              Add multiple usernames per platform if needed. Shown next to their name
+                              in chat on every thread with this customer.
+                            </p>
                           </div>
                           <div className="pt-2 border-t border-slate-200 text-xs text-slate-500 space-y-1">
                             <p>Conversation ID</p>
